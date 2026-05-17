@@ -45,6 +45,13 @@ data class Cache(
     var alternateSaturated: Boolean = false,
 )
 
+private data class LinkLoadState(
+    val currentCache: Cache,
+    val currentLinksUrls: MutableSet<String> = ConcurrentHashMap.newKeySet(),
+    val currentSubsUrls: MutableSet<String> = ConcurrentHashMap.newKeySet(),
+    val lastCountedSuffix: ConcurrentHashMap<String, AtomicInteger> = ConcurrentHashMap(),
+)
+
 class RepoLinkGenerator(
     episodes: List<ResultEpisode>,
     val page: LoadResponse? = null,
@@ -151,7 +158,51 @@ class RepoLinkGenerator(
         isCasting: Boolean,
     ): Boolean {
         val current = videos.getOrNull(offset) ?: return false
+        val state = prepareLinkLoadState(current, clearCache)
 
+        if (replayCachedLinks(state, sourceTypes, callback, subtitleCallback)) {
+            return true
+        }
+
+        val result = loadEpisodeLinks(
+            state,
+            current,
+            sourceTypes,
+            callback,
+            subtitleCallback,
+            isCasting,
+            maxLinks = if (includeAllProviderSources) MAX_ALTERNATE_LINKS_PER_PROVIDER else null
+        )
+        var alternateResult = false
+        if (includeAllProviderSources) {
+            for (episode in getAlternateProviderEpisodes(current)) {
+                coroutineContext.ensureActive()
+                alternateResult = withTimeoutOrNull(20_000L) {
+                    loadEpisodeLinks(
+                        state,
+                        episode,
+                        sourceTypes,
+                        callback,
+                        subtitleCallback,
+                        isCasting,
+                        maxLinks = MAX_ALTERNATE_LINKS_PER_PROVIDER
+                    )
+                } == true || alternateResult
+            }
+        }
+
+        synchronized(state.currentCache) {
+            state.currentCache.saturated = state.currentCache.linkCache.isNotEmpty()
+            if (includeAllProviderSources) {
+                state.currentCache.alternateSaturated = true
+            }
+            state.currentCache.lastCachedTimestamp = unixTime
+        }
+
+        return result || alternateResult
+    }
+
+    private fun prepareLinkLoadState(current: ResultEpisode, clearCache: Boolean): LinkLoadState {
         val currentCache = synchronized(cache) {
             cache[current.apiName to current.id] ?: Cache(
                 mutableSetOf(),
@@ -163,131 +214,113 @@ class RepoLinkGenerator(
             }
         }
 
-        // These act as a general filter to prevent duplication of links or names
-        // Avoid any possible ConcurrentModificationException
-        val currentLinksUrls = ConcurrentHashMap.newKeySet<String>()
-        val currentSubsUrls = ConcurrentHashMap.newKeySet<String>()
-        // Use atomics as otherwise we get race conditions when incrementing, while rare it did actually happen!
-        val lastCountedSuffix = ConcurrentHashMap<String, AtomicInteger>()
-
         synchronized(currentCache) {
-            val outdatedCache =
-                unixTime - currentCache.lastCachedTimestamp > 60 * 20 // 20 minutes
-
+            val outdatedCache = unixTime - currentCache.lastCachedTimestamp > 60 * 20
             if (outdatedCache || clearCache) {
                 currentCache.linkCache.clear()
                 currentCache.subtitleCache.clear()
                 currentCache.saturated = false
                 currentCache.alternateSaturated = false
             } else if (currentCache.linkCache.isNotEmpty()) {
-                Log.d(
-                    TAG,
-                    "Resumed previous loading from ${unixTime - currentCache.lastCachedTimestamp}s ago"
-                )
+                Log.d(TAG, "Resumed previous loading from ${unixTime - currentCache.lastCachedTimestamp}s ago")
             }
+        }
 
-            // call all callbacks
-            currentCache.linkCache.forEach { link ->
-                currentLinksUrls.add(link.url)
+        return LinkLoadState(currentCache)
+    }
+
+    private fun replayCachedLinks(
+        state: LinkLoadState,
+        sourceTypes: Set<ExtractorLinkType>,
+        callback: (Pair<ExtractorLink?, ExtractorUri?>) -> Unit,
+        subtitleCallback: (SubtitleData) -> Unit,
+    ): Boolean {
+        synchronized(state.currentCache) {
+            state.currentCache.linkCache.forEach { link ->
+                state.currentLinksUrls.add(link.url)
                 if (sourceTypes.contains(link.type)) {
                     callback(link.withProviderDisplayName(link.source) to null)
                 }
             }
 
-            currentCache.subtitleCache.forEach { sub ->
-                currentSubsUrls.add(sub.url)
-                lastCountedSuffix.getOrPut(sub.originalName) { AtomicInteger(0) }.incrementAndGet()
+            state.currentCache.subtitleCache.forEach { sub ->
+                state.currentSubsUrls.add(sub.url)
+                state.lastCountedSuffix.getOrPut(sub.originalName) { AtomicInteger(0) }.incrementAndGet()
                 subtitleCallback(sub)
             }
 
-            // this stops all execution if links are cached
-            // no extra get requests
-            if (currentCache.saturated && (!includeAllProviderSources || currentCache.alternateSaturated)) {
-                return true
-            }
+            return state.currentCache.saturated &&
+                    (!includeAllProviderSources || state.currentCache.alternateSaturated)
         }
+    }
 
-        suspend fun loadEpisodeLinks(episode: ResultEpisode, maxLinks: Int? = null): Boolean {
-            coroutineContext.ensureActive()
-            val api = getApiFromNameNull(episode.apiName) ?: return false
-            val acceptedLinks = AtomicInteger(0)
-            return APIRepository(api).loadLinks(
-                episode.data,
-                isCasting = isCasting,
-                subtitleCallback = { file ->
-                    Log.d(TAG, "Loaded SubtitleFile: $file")
-                    val correctFile = PlayerSubtitleHelper.getSubtitleData(file)
-                    if (correctFile.url.isBlank() || !currentSubsUrls.add(correctFile.url)) {
-                        return@loadLinks
-                    }
-
-                    // Keep subtitle labels unique when multiple providers expose the same file name.
-                    val nameDecoded = correctFile.originalName.html().toString()
-                        .trim() // `%3Ch1%3Esub%20name…` → `<h1>sub name…` → `sub name…`
-                    val suffixCount =
-                        lastCountedSuffix.getOrPut(nameDecoded) { AtomicInteger(0) }.incrementAndGet()
-
-                    val updatedFile =
-                        correctFile.copy(originalName = nameDecoded, nameSuffix = "$suffixCount")
-
-                    synchronized(currentCache) {
-                        if (currentCache.subtitleCache.add(updatedFile)) {
-                            subtitleCallback(updatedFile)
-                            currentCache.lastCachedTimestamp = unixTime
-                        }
-                    }
-                },
-                callback = { link ->
-                    if (maxLinks != null && acceptedLinks.get() >= maxLinks) {
-                        throw LinkLoadingLimitReached()
-                    }
-                    val displayLink = link.withProviderDisplayName(link.source.ifBlank { episode.apiName })
-                    Log.d(TAG, "Loaded ExtractorLink: $displayLink")
-                    if (displayLink.url.isBlank() || !currentLinksUrls.add(displayLink.url)) {
-                        return@loadLinks
-                    }
-                    acceptedLinks.incrementAndGet()
-
-                    synchronized(currentCache) {
-                        if (currentCache.linkCache.add(displayLink)) {
-                            if (sourceTypes.contains(displayLink.type)) {
-                                callback(Pair(displayLink, null))
-                            }
-
-                            currentCache.linkCache.add(displayLink)
-                            currentCache.lastCachedTimestamp = unixTime
-                        }
-                    }
+    private suspend fun loadEpisodeLinks(
+        state: LinkLoadState,
+        episode: ResultEpisode,
+        sourceTypes: Set<ExtractorLinkType>,
+        callback: (Pair<ExtractorLink?, ExtractorUri?>) -> Unit,
+        subtitleCallback: (SubtitleData) -> Unit,
+        isCasting: Boolean,
+        maxLinks: Int? = null,
+    ): Boolean {
+        coroutineContext.ensureActive()
+        val api = getApiFromNameNull(episode.apiName) ?: return false
+        val acceptedLinks = AtomicInteger(0)
+        return APIRepository(api).loadLinks(
+            episode.data,
+            isCasting = isCasting,
+            subtitleCallback = { file ->
+                addSubtitleToCache(state, file, subtitleCallback)
+            },
+            callback = { link ->
+                if (maxLinks != null && acceptedLinks.get() >= maxLinks) {
+                    throw LinkLoadingLimitReached()
                 }
-            )
-        }
-
-        val result = loadEpisodeLinks(
-            current,
-            maxLinks = if (includeAllProviderSources) MAX_ALTERNATE_LINKS_PER_PROVIDER else null
+                addLinkToCache(state, episode, link, sourceTypes, acceptedLinks, callback)
+            }
         )
-        var alternateResult = false
-        if (includeAllProviderSources) {
-            for (episode in getAlternateProviderEpisodes(current)) {
-                coroutineContext.ensureActive()
-                alternateResult = withTimeoutOrNull(20_000L) {
-                    loadEpisodeLinks(
-                        episode,
-                        maxLinks = MAX_ALTERNATE_LINKS_PER_PROVIDER
-                    )
-                } == true || alternateResult
+    }
+
+    private fun addSubtitleToCache(
+        state: LinkLoadState,
+        file: com.lagradost.cloudstream3.SubtitleFile,
+        subtitleCallback: (SubtitleData) -> Unit,
+    ) {
+        Log.d(TAG, "Loaded SubtitleFile: $file")
+        val correctFile = PlayerSubtitleHelper.getSubtitleData(file)
+        if (correctFile.url.isBlank() || !state.currentSubsUrls.add(correctFile.url)) return
+
+        val nameDecoded = correctFile.originalName.html().toString().trim()
+        val suffixCount = state.lastCountedSuffix.getOrPut(nameDecoded) { AtomicInteger(0) }.incrementAndGet()
+        val updatedFile = correctFile.copy(originalName = nameDecoded, nameSuffix = "$suffixCount")
+
+        synchronized(state.currentCache) {
+            if (state.currentCache.subtitleCache.add(updatedFile)) {
+                subtitleCallback(updatedFile)
+                state.currentCache.lastCachedTimestamp = unixTime
             }
         }
+    }
 
-        synchronized(currentCache) {
-            currentCache.saturated = currentCache.linkCache.isNotEmpty()
-            if (includeAllProviderSources) {
-                currentCache.alternateSaturated = true
+    private fun addLinkToCache(
+        state: LinkLoadState,
+        episode: ResultEpisode,
+        link: ExtractorLink,
+        sourceTypes: Set<ExtractorLinkType>,
+        acceptedLinks: AtomicInteger,
+        callback: (Pair<ExtractorLink?, ExtractorUri?>) -> Unit,
+    ) {
+        val displayLink = link.withProviderDisplayName(link.source.ifBlank { episode.apiName })
+        Log.d(TAG, "Loaded ExtractorLink: $displayLink")
+        if (displayLink.url.isBlank() || !state.currentLinksUrls.add(displayLink.url)) return
+        acceptedLinks.incrementAndGet()
+
+        synchronized(state.currentCache) {
+            if (state.currentCache.linkCache.add(displayLink)) {
+                if (sourceTypes.contains(displayLink.type)) callback(displayLink to null)
+                state.currentCache.lastCachedTimestamp = unixTime
             }
-            currentCache.lastCachedTimestamp = unixTime
         }
-
-        return result || alternateResult
     }
 
     private suspend fun getAlternateProviderEpisodes(current: ResultEpisode): List<ResultEpisode> {
