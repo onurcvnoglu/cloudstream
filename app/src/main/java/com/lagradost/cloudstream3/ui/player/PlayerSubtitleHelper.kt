@@ -35,6 +35,7 @@ enum class SubtitleOrigin {
  * @param url Url for the subtitle, when EMBEDDED_IN_VIDEO this variable is used as the real backend id
  * @param headers if empty it will use the base onlineDataSource headers else only the specified headers
  * @param languageCode usually, tags such as "en", "es-mx", or "zh-hant-TW". But it could be something like "English 4"
+ * @param source extractor source that produced the subtitle, when it can be identified reliably
  */
 @Serializable
 data class SubtitleData(
@@ -45,12 +46,13 @@ data class SubtitleData(
     @SerialName("mimeType") val mimeType: String,
     @SerialName("headers") val headers: Map<String, String>,
     @SerialName("languageCode") val languageCode: String?,
+    @SerialName("source") val source: String? = null,
 ) {
     /** Internal ID for media3, unique for each link. */
     @JsonIgnore
     fun getId(): String {
         return if (origin == SubtitleOrigin.EMBEDDED_IN_VIDEO) url
-        else "$url|$name"
+        else "$url|$name|${source.orEmpty()}"
     }
 
     /** Returns true if langCode is the same as the IETF tag */
@@ -116,7 +118,7 @@ class PlayerSubtitleHelper {
                 origin = SubtitleOrigin.URL,
                 mimeType = subtitleFile.url.toSubtitleMimeType(),
                 headers = subtitleFile.headers ?: emptyMap(),
-                languageCode = subtitleFile.langTag ?: subtitleFile.lang
+                languageCode = subtitleFile.langTag ?: subtitleFile.lang,
             )
         }
     }

@@ -169,6 +169,10 @@ data class VideoLive<T>(
     val instance: Int,
 )
 
+internal fun previousEpisodeIndex(index: Int, hasPrevious: Boolean): Int? {
+    return index.takeIf { hasPrevious }?.minus(1)
+}
+
 class PlayerGeneratorViewModel : ViewModel() {
     companion object {
         const val TAG = "PlayViewGen"
@@ -256,8 +260,8 @@ class PlayerGeneratorViewModel : ViewModel() {
 
     fun loadLinksPrev() {
         Log.i(TAG, "loadLinksPrev")
-        if (generator?.hasPrev(episodeIndex) == true) {
-            episodeIndex += 1
+        previousEpisodeIndex(episodeIndex, generator?.hasPrev(episodeIndex) == true)?.let {
+            episodeIndex = it
             loadLinks()
         }
     }

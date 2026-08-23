@@ -187,6 +187,8 @@ class GeneratorPlayer : FullScreenPlayer() {
     private var isNextEpisode: Boolean = false // this is used to reset the watch time
 
     private var preferredAutoSelectSubtitles: String? = null // null means do nothing, "" means none
+    private var preferredSource: String? = null
+    private var preferredSubtitle: SubtitlePreference? = null
     private val allMeta: List<ResultEpisode>?
         get() = viewModel.state.generatorState?.allMeta?.filterIsInstance<ResultEpisode>()
             ?.map { episode ->
@@ -197,10 +199,10 @@ class GeneratorPlayer : FullScreenPlayer() {
             }
 
     private fun setSubtitles(subtitle: SubtitleData?, userInitiated: Boolean): Boolean {
-        // If subtitle is changed and user initiated -> Save the language
-        if (subtitle != currentSelectedSubtitles && userInitiated) {
+        // If subtitle is user initiated -> Save the language and session identity.
+        if (userInitiated) {
             val subtitleLanguageTagIETF = if (subtitle == null) {
-                "" // -> No Subtitles
+                "" // -> No Subtitles
             } else {
                 subtitle.getIETF_tag()
             }
@@ -210,11 +212,23 @@ class GeneratorPlayer : FullScreenPlayer() {
                 setKey(SUBTITLE_AUTO_SELECT_KEY, subtitleLanguageTagIETF)
                 preferredAutoSelectSubtitles = subtitleLanguageTagIETF
             }
+            preferredSubtitle = subtitle?.toSubtitlePreference() ?: noSubtitlePreference()
         }
 
         currentSelectedSubtitles = subtitle
         //Log.i(TAG, "setSubtitles = $subtitle")
         return player.setPreferredSubtitles(subtitle)
+    }
+
+
+    private fun rememberSourcePreference(link: VideoLink?) {
+        link?.first?.sourceId()?.let { preferredSource = it }
+    }
+
+    private fun isSubtitleForLink(subtitle: SubtitleData?, link: VideoLink?): Boolean {
+        if (subtitle == null) return false
+        val subtitleSource = subtitle.source?.takeIf { it.isNotBlank() } ?: return true
+        return subtitleSource == link?.first?.sourceId()
     }
 
     override fun embeddedSubtitlesFetched(subtitles: List<SubtitleData>) {
@@ -515,6 +529,21 @@ class GeneratorPlayer : FullScreenPlayer() {
         // uiReset() // Removed due to UX
 
         currentSelectedLink = link
+        val subtitles = viewModel.state.subtitles
+        val allowGlobalSubtitleFallback = viewModel.state.loading !is Resource.Loading
+        val subtitle = if (sameEpisode && isSubtitleForLink(currentSelectedSubtitles, link)) {
+            currentSelectedSubtitles
+        } else {
+            getAutoSelectSubtitle(
+                subtitles,
+                settings = true,
+                downloads = true,
+                link = link,
+                allowGlobalFallback = allowGlobalSubtitleFallback
+            )
+        }
+        currentSelectedSubtitles = subtitle
+
         //  setEpisodes(viewModel.getAllMeta() ?: emptyList())
         setPlayerDimen(null)
         setTitle()
@@ -525,7 +554,6 @@ class GeneratorPlayer : FullScreenPlayer() {
         // load player
         context?.let { ctx ->
             val (url, uri) = link
-            val subtitles = viewModel.state.subtitles
             player.loadPlayer(
                 ctx,
                 sameEpisode,
@@ -535,9 +563,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                     if (isNextEpisode) 0L else getPos()
                 },
                 subtitles,
-                (if (sameEpisode) currentSelectedSubtitles else null) ?: getAutoSelectSubtitle(
-                    subtitles, settings = true, downloads = true
-                ),
+                subtitle,
                 preview = true
             )
         }
@@ -1381,6 +1407,7 @@ class GeneratorPlayer : FullScreenPlayer() {
 
                 binding.applyBtt.setOnClickListener {
                     var init = sourceIndex != startSource
+                    val selectedLink = filteredLinks.getOrNull(sourceIndex)?.link
                     if (subtitleGroupIndex != subtitleGroupIndexStart || subtitleOptionIndex != subtitleOptionIndexStart) {
                         init = init or if (subtitleGroupIndex <= 0) {
                             noSubtitles()
@@ -1393,8 +1420,9 @@ class GeneratorPlayer : FullScreenPlayer() {
                         }
                     }
                     if (init) {
-                        filteredLinks.getOrNull(sourceIndex)?.let {
-                            loadLink(it.link, true)
+                        selectedLink?.let {
+                            rememberSourcePreference(it)
+                            loadLink(it, true)
                         }
                     }
                     sourceDialog.dismissSafe(activity)
@@ -1614,8 +1642,18 @@ class GeneratorPlayer : FullScreenPlayer() {
         }
 
         val links = viewModel.state.sortLinks(currentQualityProfile)
+        val preferred = preferredSource?.takeIf { it.isNotBlank() }
+        val preferredLink = selectPreferredLink(links, preferred)
 
-        val firstAvailableLink = links.firstOrNull { it.shouldUseLink }?.link
+        // While loading, wait for the explicitly selected source instead of starting a faster
+        // fallback source. Terminal loading state and the skip action intentionally allow fallback.
+        if (preferred != null && preferredLink?.link?.first?.sourceId() != preferred &&
+            viewModel.state.loading is Resource.Loading
+        ) {
+            return
+        }
+
+        val firstAvailableLink = preferredLink?.link
         if (firstAvailableLink == null) {
             noLinksFound()
             return
@@ -1694,9 +1732,14 @@ class GeneratorPlayer : FullScreenPlayer() {
     private fun getNextLink(): DisplayLink? {
         val links = viewModel.state.sortLinks(currentQualityProfile)
         val currentIndex = links.indexOfFirst { it.link == currentSelectedLink }
-        val nextPotentialLink =
-            links.withIndex().firstOrNull { it.index > currentIndex && it.value.shouldUseLink }
-        return nextPotentialLink?.value
+        val nextAfterCurrent = links.withIndex().firstOrNull {
+            it.index > currentIndex && it.value.shouldUseLink && it.value.link != currentSelectedLink
+        }?.value
+        if (nextAfterCurrent != null) return nextAfterCurrent
+
+        // A preferred source can be in the middle or at the end of the sorted list. Wrap once
+        // so a failed current link cannot hide usable links before it.
+        return links.firstOrNull { it.shouldUseLink && it.link != currentSelectedLink }
     }
 
     override fun hasNextMirror(): Boolean {
@@ -1795,20 +1838,40 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     private fun getAutoSelectSubtitle(
-        subtitles: Set<SubtitleData>, settings: Boolean, downloads: Boolean
+        subtitles: Set<SubtitleData>,
+        settings: Boolean,
+        downloads: Boolean,
+        link: VideoLink? = currentSelectedLink,
+        allowGlobalFallback: Boolean = true,
     ): SubtitleData? {
+        if (preferredSubtitle?.isNone == true) return null
+
+        val orderedSubtitles = sortSubs(subtitles)
+        val activeSource = link?.first?.sourceId()
+        selectPreferredSubtitle(orderedSubtitles, preferredSubtitle, activeSource)?.let {
+            return it
+        }
+
         val langCode = preferredAutoSelectSubtitles ?: return null
+        if (langCode.isBlank()) return null
+
+        // A source-linked subtitle wins over downloaded or global language fallback.
+        if (activeSource != null) {
+            orderedSubtitles.firstOrNull {
+                it.source == activeSource && it.matchesLanguageCode(langCode)
+            }?.let { return it }
+        }
+
+        if (!allowGlobalFallback) return null
+
         if (downloads) {
-            sortSubs(subtitles).firstOrNull {
-                it.origin == SubtitleOrigin.DOWNLOADED_FILE && it.matchesLanguageCode(
-                    langCode
-                )
+            orderedSubtitles.firstOrNull {
+                it.origin == SubtitleOrigin.DOWNLOADED_FILE && it.matchesLanguageCode(langCode)
             }?.let { return it }
         }
 
         if (!settings) return null
-
-        return sortSubs(subtitles).firstOrNull { it.matchesLanguageCode(langCode) }
+        return orderedSubtitles.firstOrNull { it.matchesLanguageCode(langCode) }
     }
 
     private fun autoSelectFromSettings(): Boolean {
@@ -1817,8 +1880,10 @@ class GeneratorPlayer : FullScreenPlayer() {
         val current = player.getCurrentPreferredSubtitle()
         Log.i(TAG, "autoSelectFromSettings = $current")
         context?.let { ctx ->
-            // Only use the player preferred subtitle if it matches the available language
-            if (current != null && (langCode == null || current.matchesLanguageCode(langCode))) {
+            // Only use the player preferred subtitle if it matches the available language and source.
+            if (current != null && isSubtitleForLink(current, currentSelectedLink) &&
+                (langCode == null || current.matchesLanguageCode(langCode))
+            ) {
                 if (setSubtitles(current, false)) {
                     player.saveData()
                     player.reloadPlayer(ctx)
@@ -1827,7 +1892,11 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
             } else if (!langCode.isNullOrEmpty()) {
                 getAutoSelectSubtitle(
-                    viewModel.state.subtitles, settings = true, downloads = false
+                    viewModel.state.subtitles,
+                    settings = true,
+                    downloads = false,
+                    link = currentSelectedLink,
+                    allowGlobalFallback = viewModel.state.loading !is Resource.Loading
                 )?.let { sub ->
                     if (setSubtitles(sub, false)) {
                         player.saveData()
@@ -1842,12 +1911,17 @@ class GeneratorPlayer : FullScreenPlayer() {
     }
 
     private fun autoSelectFromDownloads() {
+        if (viewModel.state.loading is Resource.Loading) return
         if (player.getCurrentPreferredSubtitle() != null) {
             return
         }
         val sub =
-            getAutoSelectSubtitle(viewModel.state.subtitles, settings = false, downloads = true)
-                ?: return
+            getAutoSelectSubtitle(
+                viewModel.state.subtitles,
+                settings = false,
+                downloads = true,
+                link = currentSelectedLink
+            ) ?: return
         val ctx = context ?: return
         if (!setSubtitles(sub, false)) {
             return
@@ -2212,6 +2286,7 @@ class GeneratorPlayer : FullScreenPlayer() {
     @MainThread
     fun releasePlayer() {
         player.release()
+        // Explicit source/subtitle preferences live separately and survive this player reset.
         currentSelectedSubtitles = null
         currentSelectedLink = null
         isPlayerActive.set(false)
@@ -2348,11 +2423,13 @@ class GeneratorPlayer : FullScreenPlayer() {
                     //    showToast(activity, R.string.unexpected_error, Toast.LENGTH_SHORT)
                     //}
                     startPlayer()
+                    autoSelectSubtitles()
                 }
 
                 is Resource.Failure -> {
                     showToast(loading.errorString, Toast.LENGTH_LONG)
                     startPlayer()
+                    autoSelectSubtitles()
                 }
             }
         }
@@ -2378,11 +2455,20 @@ class GeneratorPlayer : FullScreenPlayer() {
             }
 
             safe {
-                if (!isPlayerActive.get() && viewModel.state.links.any { link ->
+                val preferred = preferredSource?.takeIf { it.isNotBlank() }
+                val preferredAvailable = preferred != null && sortedLinks.any {
+                    it.shouldUseLink && it.link.first?.sourceId() == preferred
+                }
+                val hasAutoStartLink = if (preferred != null) {
+                    preferredAvailable
+                } else {
+                    viewModel.state.links.any { link ->
                         getLinkPriority(currentQualityProfile, link.first) >=
                                 QualityDataHelper.AUTO_SKIP_PRIORITY
                     }
-                ) {
+                }
+
+                if (!isPlayerActive.get() && hasAutoStartLink) {
                     startPlayer()
                 }
             }

@@ -64,7 +64,7 @@ class RepoLinkGenerator(
         // These act as a general filter to prevent duplication of links or names
         // Avoid any possible ConcurrentModificationException
         val currentLinksUrls = ConcurrentHashMap.newKeySet<String>()
-        val currentSubsUrls = ConcurrentHashMap.newKeySet<String>()
+        val currentSubsKeys = ConcurrentHashMap.newKeySet<Pair<String, String?>>()
         // Use atomics as otherwise we get race conditions when incrementing, while rare it did actually happen!
         val lastCountedSuffix = ConcurrentHashMap<String, AtomicInteger>()
 
@@ -92,7 +92,7 @@ class RepoLinkGenerator(
             }
 
             currentCache.subtitleCache.forEach { sub ->
-                currentSubsUrls.add(sub.url)
+                currentSubsKeys.add(sub.url to sub.source)
                 lastCountedSuffix.getOrPut(sub.originalName) { AtomicInteger(0) }.incrementAndGet()
                 subtitleCallback(sub)
             }
@@ -112,7 +112,7 @@ class RepoLinkGenerator(
             subtitleCallback = { file ->
                 Log.d(TAG, "Loaded SubtitleFile: $file")
                 val correctFile = PlayerSubtitleHelper.getSubtitleData(file)
-                if (correctFile.url.isBlank() || !currentSubsUrls.add(correctFile.url)) {
+                if (correctFile.url.isBlank() || !currentSubsKeys.add(correctFile.url to correctFile.source)) {
                     return@loadLinks
                 }
 

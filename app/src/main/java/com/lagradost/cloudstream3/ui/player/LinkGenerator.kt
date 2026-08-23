@@ -51,13 +51,49 @@ class LinkGenerator(
         isCasting: Boolean
     ): Boolean {
         links.amap { link ->
-            if (!extract || !loadExtractor(link.url, refererUrl, {
-                    subtitleCallback(PlayerSubtitleHelper.getSubtitleData(it))
-                }) {
-                    callback(it to null)
-                }) {
+            if (!extract) {
+                callback(
+                    newExtractorLink(
+                        "",
+                        link.name ?: link.url,
+                        unshortenLinkSafe(link.url), // unshorten because it might be a raw link
+                        type = INFER_TYPE,
+                    ) {
+                        this.referer = refererUrl ?: ""
+                        this.quality = Qualities.Unknown.value
+                    } to null
+                )
+                return@amap
+            }
 
-                // if don't extract or if no extractor found simply return the link
+            // Extractors can emit subtitles before their media links. Buffer the subtitles until
+            // the extractor source is known so a relation is never inferred from callback order.
+            val extractedLinks = mutableListOf<ExtractorLink>()
+            val extractedSubtitles = mutableListOf<SubtitleData>()
+            val loaded = loadExtractor(
+                link.url,
+                refererUrl,
+                subtitleCallback = { subtitle ->
+                    extractedSubtitles += PlayerSubtitleHelper.getSubtitleData(subtitle)
+                },
+                callback = { extractedLink ->
+                    extractedLinks += extractedLink
+                    callback(extractedLink to null)
+                }
+            )
+
+            if (loaded) {
+                val source = extractedLinks
+                    .map { it.source }
+                    .distinct()
+                    .singleOrNull()
+                    ?.takeIf { it.isNotBlank() }
+
+                extractedSubtitles.forEach { subtitle ->
+                    subtitleCallback(subtitle.copy(source = source))
+                }
+            } else {
+                // If no extractor matched, simply return the original raw link.
                 callback(
                     newExtractorLink(
                         "",
