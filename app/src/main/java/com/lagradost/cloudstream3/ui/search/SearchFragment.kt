@@ -6,6 +6,7 @@ import android.content.DialogInterface
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -23,7 +24,9 @@ import androidx.preference.PreferenceManager
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.children
 import androidx.core.view.doOnLayout
+import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
@@ -159,6 +162,73 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
 
     var selectedSearchTypes = mutableListOf<TvType>()
     var selectedApis = mutableSetOf<String>()
+    private var isAdvancedSearchEnabled = true
+
+    private fun updateTvSearchFocusTarget() {
+        if (!isLayout(TV or EMULATOR)) return
+        val binding = binding ?: return
+        val suggestions = binding.searchSuggestionsRecycler
+        val master = binding.searchMasterRecycler
+        val standard = binding.searchAutofitResults
+        val history = binding.searchHistoryRecycler
+        val target = resolveSearchFocusTarget(
+            hasSuggestions = suggestions.isVisible &&
+                (suggestions.adapter as? SearchSuggestionAdapter)?.immutableCurrentList?.isNotEmpty() == true,
+            hasQuery = !binding.mainSearch.query.isNullOrBlank(),
+            isAdvancedSearch = isAdvancedSearchEnabled,
+            hasAdvancedResults = master.isVisible &&
+                (master.adapter as? ParentItemAdapter)?.immutableCurrentList?.any {
+                    it.list.list.isNotEmpty()
+                } == true,
+            hasStandardResults = standard.isVisible &&
+                (standard.adapter as? SearchAdapter)?.immutableCurrentList?.isNotEmpty() == true,
+            hasHistory = history.isVisible &&
+                (history.adapter as? SearchHistoryAdaptor)?.immutableCurrentList?.isNotEmpty() == true,
+        )
+        val targetRecycler = when (target) {
+            SearchFocusTarget.SUGGESTIONS -> suggestions
+            SearchFocusTarget.ADVANCED_RESULTS -> master
+            SearchFocusTarget.STANDARD_RESULTS -> standard
+            SearchFocusTarget.HISTORY -> history
+            SearchFocusTarget.NONE -> null
+        }
+        val targetId = targetRecycler?.id ?: View.NO_ID
+        val chips = binding.tvtypesChipsScroll.tvtypesChips.root
+        val firstChip = chips.children.firstOrNull { it.isVisible && it.isFocusable }
+
+        binding.mainSearch.nextFocusDownId = firstChip?.id ?: targetId
+        binding.searchFilter.nextFocusDownId = firstChip?.id ?: targetId
+        chips.nextFocusDownId = targetId
+        chips.children.filter { it.isVisible && it.isFocusable }.forEach { chip ->
+            chip.nextFocusDownId = targetId
+            chip.setOnKeyListener { _, keyCode, event ->
+                if (keyCode != KeyEvent.KEYCODE_DPAD_DOWN || event.action != KeyEvent.ACTION_DOWN) {
+                    return@setOnKeyListener false
+                }
+                targetRecycler?.let(::focusFirstSearchItem)
+                true
+            }
+        }
+    }
+
+    private fun focusFirstSearchItem(recyclerView: RecyclerView) {
+        recyclerView.doOnLayout {
+            recyclerView.post {
+                val firstItem = (0 until recyclerView.childCount)
+                    .asSequence()
+                    .map(recyclerView::getChildAt)
+                    .mapNotNull { it.findFirstFocusableDescendant() }
+                    .firstOrNull()
+                (firstItem ?: recyclerView).requestFocus()
+            }
+        }
+    }
+
+    private fun View.findFirstFocusableDescendant(): View? {
+        if (isVisible && isEnabled && isFocusable) return this
+        if (this !is ViewGroup) return null
+        return children.mapNotNull { it.findFirstFocusableDescendant() }.firstOrNull()
+    }
 
     /**
      * Will filter all providers by preferred media and selectedSearchTypes.
@@ -214,6 +284,7 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                     search(binding?.mainSearch?.query?.toString())
                 }
             }
+            updateTvSearchFocusTarget()
         }
     }
 
@@ -406,7 +477,7 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
         }
 
         val settingsManager = context?.let { PreferenceManager.getDefaultSharedPreferences(it) }
-        val isAdvancedSearch = settingsManager?.getBoolean("advanced_search", true) ?: true
+        isAdvancedSearchEnabled = settingsManager?.getBoolean("advanced_search", true) ?: true
         val isSearchSuggestionsEnabled = settingsManager?.getBoolean("search_suggestions_enabled", true) ?: true
 
         selectedSearchTypes = DataStoreHelper.searchPreferenceTags.toMutableList()
@@ -453,11 +524,11 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                 }
                 binding.apply {
                     searchHistoryRecycler.isVisible = showHistory
-                    searchMasterRecycler.isVisible = !showHistory && isAdvancedSearch
-                    searchAutofitResults.isVisible = !showHistory && !isAdvancedSearch
-                    // Hide suggestions when showing history or showing search results
-                    searchSuggestionsRecycler.isVisible = !showHistory && isSearchSuggestionsEnabled
+                    searchMasterRecycler.isVisible = !showHistory && isAdvancedSearchEnabled
+                    searchAutofitResults.isVisible = !showHistory && !isAdvancedSearchEnabled
+                    searchSuggestionsRecycler.isVisible = false
                 }
+                updateTvSearchFocusTarget()
 
                 return true
             }
@@ -468,10 +539,8 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                 is Resource.Success -> {
                     it.value.let { data ->
                         val list = data.list
-                        if (list.isNotEmpty()) {
-                            (binding.searchAutofitResults.adapter as? SearchAdapter)?.submitList(
-                                list
-                            )
+                        (binding.searchAutofitResults.adapter as? SearchAdapter)?.submitList(list) {
+                            updateTvSearchFocusTarget()
                         }
                     }
                     searchExitIcon?.alpha = 1f
@@ -522,7 +591,9 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                         )
                     }
 
-                    submitList(newItems)
+                    submitList(newItems) {
+                        updateTvSearchFocusTarget()
+                    }
                     //notifyDataSetChanged()
                 }
             } catch (e: Exception) {
@@ -667,33 +738,29 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
         }
 
         observe(searchViewModel.currentHistory) { list ->
-            (binding.searchHistoryRecycler.adapter as? SearchHistoryAdaptor?)?.submitList(list)
-             // Scroll to top to show newest items (list is sorted by newest first)
-            if (list.isNotEmpty()) {
-                binding.searchHistoryRecycler.scrollToPosition(0)
+            (binding.searchHistoryRecycler.adapter as? SearchHistoryAdaptor?)?.submitList(list) {
+                if (list.isNotEmpty()) {
+                    binding.searchHistoryRecycler.scrollToPosition(0)
+                }
+                updateTvSearchFocusTarget()
             }
         }
 
-        // Observe search suggestions
         observe(searchViewModel.searchSuggestions) { suggestions ->
             val hasSuggestions = suggestions.isNotEmpty()
-            binding.searchSuggestionsRecycler.isVisible = hasSuggestions
-            (binding.searchSuggestionsRecycler.adapter as? SearchSuggestionAdapter?)?.submitList(suggestions)
-
-            // On non-phone layouts, redirect focus and handle back button
-            if (!isLayout(PHONE)) {
-                if (hasSuggestions) {
-                    binding.tvtypesChipsScroll.tvtypesChips.root.nextFocusDownId = R.id.search_suggestions_recycler
-                    // Attach back button callback to clear suggestions
-                    activity?.attachBackPressedCallback("SearchFragment") {
-                        searchViewModel.clearSuggestions()
+            binding.searchSuggestionsRecycler.isVisible = false
+            (binding.searchSuggestionsRecycler.adapter as? SearchSuggestionAdapter?)?.submitList(suggestions) {
+                binding.searchSuggestionsRecycler.isVisible = hasSuggestions
+                if (!isLayout(PHONE)) {
+                    if (hasSuggestions) {
+                        activity?.attachBackPressedCallback("SearchFragment") {
+                            searchViewModel.clearSuggestions()
+                        }
+                    } else {
+                        activity?.detachBackPressedCallback("SearchFragment")
                     }
-                } else {
-                    // Reset to default focus target (history)
-                    binding.tvtypesChipsScroll.tvtypesChips.root.nextFocusDownId = R.id.search_history_recycler
-                    // Detach back button callback when no suggestions
-                    activity?.detachBackPressedCallback("SearchFragment")
                 }
+                updateTvSearchFocusTarget()
             }
         }
 

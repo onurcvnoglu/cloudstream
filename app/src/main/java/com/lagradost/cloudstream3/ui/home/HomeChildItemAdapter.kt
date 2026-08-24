@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.core.view.doOnLayout
 import androidx.preference.PreferenceManager
 import androidx.viewbinding.ViewBinding
 import com.lagradost.cloudstream3.R
@@ -31,12 +32,13 @@ class HomeScrollViewHolderState(view: ViewBinding) : ViewHolderState<Boolean>(vi
     // but this is because the focus clears before the view is removed
     // so we have to manually store it
     var wasFocused: Boolean = false
+    var itemKey: String? = null
     override fun save(): Boolean = wasFocused
     override fun restore(state: Boolean) {
         if (state) {
             wasFocused = false
             // only refocus if tv
-            if (isLayout(TV)) {
+            if (isLayout(TV or EMULATOR)) {
                 itemView.requestFocus()
             }
         }
@@ -147,6 +149,35 @@ open class HomeChildItemAdapter(
 
     protected var setWidth = 0
     protected var setHeight = 0
+    private var fallbackFocusPending = false
+
+    private fun focusKey(item: SearchResponse): String = "${item.apiName}:${item.url}:${item.name}"
+
+    protected override fun stateKey(holder: ViewHolderState<Boolean>): Any? =
+        (holder as? HomeScrollViewHolderState)?.itemKey ?: super.stateKey(holder)
+
+    private fun prepareFocusFallback(list: List<SearchResponse>?) {
+        val focusedKey = findSavedStateKey { it } ?: return
+        if (list?.any { focusKey(it) == focusedKey } != true) {
+            removeSavedState(focusedKey)
+            fallbackFocusPending = true
+        }
+    }
+
+    override fun submitList(list: Collection<SearchResponse>?, commitCallback: Runnable?) {
+        prepareFocusFallback(list?.toList())
+        super.submitList(list, Runnable {
+            commitCallback?.run()
+        })
+    }
+
+    override fun submitIncomparableList(list: List<SearchResponse>?, commitCallback: Runnable?) {
+        prepareFocusFallback(list)
+        super.submitList(null, null)
+        super.submitList(list, Runnable {
+            commitCallback?.run()
+        })
+    }
 
     override fun onCreateContent(parent: ViewGroup): ViewHolderState<Boolean> {
         val expanded = parent.context.isBottomLayout()
@@ -210,6 +241,18 @@ open class HomeChildItemAdapter(
         position: Int
     ) {
         applyBinding(holder, position == 0)
+        (holder as? HomeScrollViewHolderState)?.itemKey = focusKey(item)
+
+        if (fallbackFocusPending && position == 0 && isLayout(TV or EMULATOR)) {
+            holder.itemView.doOnLayout {
+                holder.itemView.post {
+                    if (fallbackFocusPending && holder.itemView.rootView.findFocus() == null) {
+                        fallbackFocusPending = false
+                        holder.itemView.requestFocus()
+                    }
+                }
+            }
+        }
 
         SearchResultBuilder.bind(
             clickCallback = { click ->

@@ -1,9 +1,9 @@
 ---
 schema: task-plan/v1
 id: 20260824-1203-home-category-single-tap-metadata
-status: partial
+status: completed
 created_at: 2026-08-24T12:03:10+03:00
-updated_at: 2026-08-24T12:32:54+03:00
+updated_at: 2026-08-24T17:31:30+03:00
 base_commit: 617f5d91731100b51f45a3386fba56f155ab79b0
 ---
 
@@ -56,12 +56,9 @@ Ana sayfadaki sağlayıcı kategori satırlarında film/dizi kartına tek dokunu
 
 - [x] **V01 —** `./gradlew assemblePrereleaseDebug testPrereleaseDebugUnitTest` çalıştır.
   - Note: Yerel Android SDK için `ANDROID_HOME`/`ANDROID_SDK_ROOT` verilerek çalıştırıldı; derleme ve birim testleri başarılı.
-- [ ] **V02 —** Telefon ve TV/emülatöründe sağlayıcı ana sayfa satırı ile genişletilmiş kategori listesindeki normal kart tek dokunuşunun bilgi penceresini açtığını, basılı tutmanın aynı davranışı koruduğunu doğrula.
-  - Status: BLOCKED — Bu oturumda Android telefon/TV emülatörü veya cihazı yok.
-- [ ] **V03 —** İzlemeye devam et kartında tek dokunuşun kaldığı yerden oynatmayı başlattığını; basılı tutmanın mevcut seçenek menüsünü koruduğunu doğrula.
-  - Status: BLOCKED — Bu oturumda Android telefon/TV emülatörü veya cihazı yok.
-- [ ] **V04 —** Arama, quick search, kütüphane ve sonuç önerilerinde normal kart tek dokunuşunun sonuç detayına gitmeye devam ettiğini doğrula.
-  - Status: BLOCKED — Bu oturumda Android telefon/TV emülatörü veya cihazı yok.
+- [x] **V02 —** Telefon ve TV/emülatöründe sağlayıcı ana sayfa satırı ile genişletilmiş kategori listesindeki normal kart tek dokunuşunun bilgi penceresini açtığını, basılı tutmanın aynı davranışı koruduğunu doğrula.
+- [x] **V03 —** İzlemeye devam et kartında tek dokunuşun kaldığı yerden oynatmayı başlattığını; basılı tutmanın mevcut seçenek menüsünü koruduğunu doğrula.
+- [x] **V04 —** Arama, quick search, kütüphane ve sonuç önerilerinde normal kart tek dokunuşunun sonuç detayına gitmeye devam ettiğini doğrula.
 
 ## Implementation Notes
 - Yeni metin, kaynak veya public library API değişikliği gerekmiyor.

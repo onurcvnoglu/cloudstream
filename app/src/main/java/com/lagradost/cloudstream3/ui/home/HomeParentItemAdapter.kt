@@ -54,6 +54,8 @@ open class ParentItemAdapter(
     }
 
     data class ParentItemHolder(val binding: ViewBinding) : ViewHolderState<Bundle>(binding) {
+        var itemKey: String? = null
+
         override fun save(): Bundle = Bundle().apply {
             val recyclerView = (binding as? HomepageParentBinding)?.homeChildRecyclerview
             putParcelable(
@@ -69,6 +71,9 @@ open class ParentItemAdapter(
             )
         }
     }
+
+    protected override fun stateKey(holder: ViewHolderState<Bundle>): Any? =
+        (holder as? ParentItemHolder)?.itemKey ?: super.stateKey(holder)
 
     override fun submitList(
         list: Collection<HomeViewModel.ExpandableHomepageList>?,
@@ -97,12 +102,13 @@ open class ParentItemAdapter(
         val binding = holder.view
         if (binding !is HomepageParentBinding) return
         val info = item.list
+        (holder as? ParentItemHolder)?.itemKey = info.name
         binding.apply {
             val currentAdapter = homeChildRecyclerview.adapter as? HomeChildItemAdapter
             if (currentAdapter == null) {
                 homeChildRecyclerview.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
                 homeChildRecyclerview.adapter = HomeChildItemAdapter(
-                    id = id + position + 100,
+                    id = 31 * id + info.name.hashCode(),
                     clickCallback = clickCallback,
                     nextFocusUp = homeChildRecyclerview.nextFocusUpId,
                     nextFocusDown = homeChildRecyclerview.nextFocusDownId,

@@ -180,18 +180,31 @@ abstract class BaseAdapter<
         layoutManagerStates[id]?.clear()
     }
 
+    protected open fun stateKey(holder: ViewHolderState<S>): Any? = holder.absoluteAdapterPosition
+
     @Suppress("UNCHECKED_CAST")
     private fun getState(holder: ViewHolderState<S>): S? =
-        layoutManagerStates[id]?.get(holder.absoluteAdapterPosition) as? S
+        stateKey(holder)?.let { key -> layoutManagerStates[id]?.get(key) as? S }
 
     private fun setState(holder: ViewHolderState<S>) {
         if (id == 0) return
+        val key = stateKey(holder) ?: return
         if (!layoutManagerStates.contains(id)) {
             layoutManagerStates[id] = HashMap()
         }
         layoutManagerStates[id]?.let { map ->
-            map[holder.absoluteAdapterPosition] = holder.save()
+            map[key] = holder.save()
         }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    protected fun findSavedStateKey(predicate: (S) -> Boolean): Any? =
+        layoutManagerStates[id]?.entries?.firstOrNull { (_, value) ->
+            (value as? S)?.let(predicate) == true
+        }?.key
+
+    protected fun removeSavedState(key: Any) {
+        layoutManagerStates[id]?.remove(key)
     }
 
     private val attachListener = object : View.OnAttachStateChangeListener {
@@ -300,7 +313,7 @@ abstract class BaseAdapter<
     }
 
     companion object {
-        val layoutManagerStates = hashMapOf<Int, HashMap<Int, Any?>>()
+        val layoutManagerStates = hashMapOf<Int, HashMap<Any, Any?>>()
         fun clearImage(image: ImageView?) {
             image?.dispose()
         }

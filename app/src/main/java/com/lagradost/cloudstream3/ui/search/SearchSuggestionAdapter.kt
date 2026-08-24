@@ -50,6 +50,11 @@ class SearchSuggestionAdapter(
         val binding = holder.view as? SearchSuggestionItemBinding ?: return
         binding.apply {
             suggestionText.text = item
+            val isTvLayout = isLayout(TV or EMULATOR)
+            suggestionItem.isFocusable = isTvLayout
+            suggestionItem.isFocusableInTouchMode = isTvLayout
+            suggestionFill.isFocusable = isTvLayout
+            suggestionFill.isFocusableInTouchMode = isTvLayout
             
             // Click on the whole item to search
             suggestionItem.setOnClickListener {
