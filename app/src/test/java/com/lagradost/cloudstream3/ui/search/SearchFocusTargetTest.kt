@@ -1,6 +1,8 @@
 package com.lagradost.cloudstream3.ui.search
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SearchFocusTargetTest {
@@ -67,6 +69,38 @@ class SearchFocusTargetTest {
                 hasAdvancedResults = false,
                 hasStandardResults = true,
                 hasHistory = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `focus only moves while source and target are still valid`() {
+        assertTrue(
+            canMoveSearchFocus(
+                sourceHasFocus = true,
+                targetVisible = true,
+                targetHasItems = true,
+            ),
+        )
+        assertFalse(
+            canMoveSearchFocus(
+                sourceHasFocus = false,
+                targetVisible = true,
+                targetHasItems = true,
+            ),
+        )
+        assertFalse(
+            canMoveSearchFocus(
+                sourceHasFocus = true,
+                targetVisible = false,
+                targetHasItems = true,
+            ),
+        )
+        assertFalse(
+            canMoveSearchFocus(
+                sourceHasFocus = true,
+                targetVisible = true,
+                targetHasItems = false,
             ),
         )
     }

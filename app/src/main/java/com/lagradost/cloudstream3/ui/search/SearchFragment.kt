@@ -144,6 +144,8 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
     }
 
     override fun onDestroyView() {
+        cancelPendingSearchFocus()
+        lastTvSearchChipId = View.NO_ID
         hideKeyboard()
         bottomSheetDialog?.ownHide()
         activity?.detachBackPressedCallback("SearchFragment")
@@ -163,6 +165,9 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
     var selectedSearchTypes = mutableListOf<TvType>()
     var selectedApis = mutableSetOf<String>()
     private var isAdvancedSearchEnabled = true
+    private var pendingSearchFocusRecycler: RecyclerView? = null
+    private var pendingSearchFocusListener: RecyclerView.OnChildAttachStateChangeListener? = null
+    private var lastTvSearchChipId = View.NO_ID
 
     private fun updateTvSearchFocusTarget() {
         if (!isLayout(TV or EMULATOR)) return
@@ -192,6 +197,9 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
             SearchFocusTarget.HISTORY -> history
             SearchFocusTarget.NONE -> null
         }
+        if (pendingSearchFocusRecycler !== targetRecycler) {
+            cancelPendingSearchFocus()
+        }
         val targetId = targetRecycler?.id ?: View.NO_ID
         val chips = binding.tvtypesChipsScroll.tvtypesChips.root
         val firstChip = chips.children.firstOrNull { it.isVisible && it.isFocusable }
@@ -205,23 +213,85 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                 if (keyCode != KeyEvent.KEYCODE_DPAD_DOWN || event.action != KeyEvent.ACTION_DOWN) {
                     return@setOnKeyListener false
                 }
-                targetRecycler?.let(::focusFirstSearchItem)
-                true
+                lastTvSearchChipId = chip.id
+                targetRecycler?.let { focusFirstSearchItem(it, chip) } ?: false
             }
         }
     }
 
-    private fun focusFirstSearchItem(recyclerView: RecyclerView) {
-        recyclerView.doOnLayout {
-            recyclerView.post {
-                val firstItem = (0 until recyclerView.childCount)
-                    .asSequence()
-                    .map(recyclerView::getChildAt)
-                    .mapNotNull { it.findFirstFocusableDescendant() }
-                    .firstOrNull()
-                (firstItem ?: recyclerView).requestFocus()
+    private fun focusFirstSearchItem(recyclerView: RecyclerView, sourceView: View): Boolean {
+        if (!canMoveSearchFocus(
+                sourceHasFocus = sourceView.hasFocus(),
+                targetVisible = recyclerView.isVisible,
+                targetHasItems = (recyclerView.adapter?.itemCount ?: 0) > 0,
+            )
+        ) {
+            return false
+        }
+        cancelPendingSearchFocus()
+
+        fun focusAttachedFirstItem(): Boolean {
+            if (!canMoveSearchFocus(
+                    sourceHasFocus = sourceView.hasFocus(),
+                    targetVisible = recyclerView.isVisible,
+                    targetHasItems = (recyclerView.adapter?.itemCount ?: 0) > 0,
+                )
+            ) {
+                return false
+            }
+            val firstItem = recyclerView.findViewHolderForAdapterPosition(0)
+                ?.itemView
+                ?.findFirstFocusableDescendant()
+                ?: return false
+            firstItem.nextFocusUpId = sourceView.id
+            return firstItem.requestFocus()
+        }
+
+        if (focusAttachedFirstItem()) return true
+
+        val listener = object : RecyclerView.OnChildAttachStateChangeListener {
+            override fun onChildViewAttachedToWindow(view: View) {
+                if (recyclerView.getChildAdapterPosition(view) != 0) return
+                if (focusAttachedFirstItem()) {
+                    cancelPendingSearchFocus()
+                } else if (!sourceView.hasFocus() || !recyclerView.isVisible) {
+                    cancelPendingSearchFocus()
+                }
+            }
+
+            override fun onChildViewDetachedFromWindow(view: View) = Unit
+        }
+        pendingSearchFocusRecycler = recyclerView
+        pendingSearchFocusListener = listener
+        recyclerView.addOnChildAttachStateChangeListener(listener)
+        recyclerView.scrollToPosition(0)
+        recyclerView.post {
+            if (pendingSearchFocusListener !== listener) return@post
+            if (focusAttachedFirstItem() || !sourceView.hasFocus() || !recyclerView.isVisible) {
+                cancelPendingSearchFocus()
             }
         }
+        return true
+    }
+
+    private fun cancelPendingSearchFocus() {
+        pendingSearchFocusListener?.let { listener ->
+            pendingSearchFocusRecycler?.removeOnChildAttachStateChangeListener(listener)
+        }
+        pendingSearchFocusRecycler = null
+        pendingSearchFocusListener = null
+    }
+
+    private fun restoreTvSearchHeaderFocus() {
+        if (!isLayout(TV or EMULATOR)) return
+        val binding = binding ?: return
+        val chips = binding.tvtypesChipsScroll.tvtypesChips.root
+        val lastChip = lastTvSearchChipId
+            .takeIf { it != View.NO_ID }
+            ?.let { chips.findViewById<View>(it) }
+            ?.takeIf { it.isVisible && it.isFocusable }
+        val firstChip = chips.children.firstOrNull { it.isVisible && it.isFocusable }
+        (lastChip ?: firstChip ?: binding.mainSearch).requestFocus()
     }
 
     private fun View.findFirstFocusableDescendant(): View? {
@@ -522,11 +592,17 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
                         searchViewModel.fetchSuggestions(newText)
                     }
                 }
+                val restoreHeaderFocus = isLayout(TV or EMULATOR) &&
+                    binding.searchSuggestionsRecycler.hasFocus()
+                cancelPendingSearchFocus()
                 binding.apply {
                     searchHistoryRecycler.isVisible = showHistory
                     searchMasterRecycler.isVisible = !showHistory && isAdvancedSearchEnabled
                     searchAutofitResults.isVisible = !showHistory && !isAdvancedSearchEnabled
                     searchSuggestionsRecycler.isVisible = false
+                }
+                if (restoreHeaderFocus) {
+                    restoreTvSearchHeaderFocus()
                 }
                 updateTvSearchFocusTarget()
 
@@ -748,9 +824,18 @@ class SearchFragment : BaseFragment<FragmentSearchBinding>(
 
         observe(searchViewModel.searchSuggestions) { suggestions ->
             val hasSuggestions = suggestions.isNotEmpty()
-            binding.searchSuggestionsRecycler.isVisible = false
-            (binding.searchSuggestionsRecycler.adapter as? SearchSuggestionAdapter?)?.submitList(suggestions) {
-                binding.searchSuggestionsRecycler.isVisible = hasSuggestions
+            val suggestionsRecycler = binding.searchSuggestionsRecycler
+            val restoreHeaderFocus = isLayout(TV or EMULATOR) &&
+                !hasSuggestions && suggestionsRecycler.hasFocus()
+            cancelPendingSearchFocus()
+            if (!hasSuggestions) {
+                suggestionsRecycler.isVisible = false
+                if (restoreHeaderFocus) {
+                    restoreTvSearchHeaderFocus()
+                }
+            }
+            (suggestionsRecycler.adapter as? SearchSuggestionAdapter?)?.submitList(suggestions) {
+                suggestionsRecycler.isVisible = hasSuggestions
                 if (!isLayout(PHONE)) {
                     if (hasSuggestions) {
                         activity?.attachBackPressedCallback("SearchFragment") {

@@ -33,12 +33,13 @@ class HomeScrollViewHolderState(view: ViewBinding) : ViewHolderState<Boolean>(vi
     // so we have to manually store it
     var wasFocused: Boolean = false
     var itemKey: String? = null
+    var restoreFocusEnabled: Boolean = true
     override fun save(): Boolean = wasFocused
     override fun restore(state: Boolean) {
         if (state) {
             wasFocused = false
             // only refocus if tv
-            if (isLayout(TV or EMULATOR)) {
+            if (restoreFocusEnabled && isLayout(TV or EMULATOR)) {
                 itemView.requestFocus()
             }
         }
@@ -151,7 +152,13 @@ open class HomeChildItemAdapter(
     protected var setHeight = 0
     private var fallbackFocusPending = false
 
-    private fun focusKey(item: SearchResponse): String = "${item.apiName}:${item.url}:${item.name}"
+    internal var automaticFocusRestoreEnabled: Boolean = true
+
+    internal fun clearSavedFocusStates() {
+        layoutManagerStates[id]?.entries?.removeAll { it.value as? Boolean == true }
+    }
+
+    internal fun focusKey(item: SearchResponse): String = homeFocusKey(item)
 
     protected override fun stateKey(holder: ViewHolderState<Boolean>): Any? =
         (holder as? HomeScrollViewHolderState)?.itemKey ?: super.stateKey(holder)
@@ -240,10 +247,17 @@ open class HomeChildItemAdapter(
         item: SearchResponse,
         position: Int
     ) {
+        android.util.Log.d(
+            "HomeFocusTrace",
+            "child-bind position=$position item=${item.name} restore=$automaticFocusRestoreEnabled"
+        )
         applyBinding(holder, position == 0)
-        (holder as? HomeScrollViewHolderState)?.itemKey = focusKey(item)
+        (holder as? HomeScrollViewHolderState)?.apply {
+            itemKey = focusKey(item)
+            restoreFocusEnabled = automaticFocusRestoreEnabled
+        }
 
-        if (fallbackFocusPending && position == 0 && isLayout(TV or EMULATOR)) {
+        if (fallbackFocusPending && automaticFocusRestoreEnabled && position == 0 && isLayout(TV or EMULATOR)) {
             holder.itemView.doOnLayout {
                 holder.itemView.post {
                     if (fallbackFocusPending && holder.itemView.rootView.findFocus() == null) {

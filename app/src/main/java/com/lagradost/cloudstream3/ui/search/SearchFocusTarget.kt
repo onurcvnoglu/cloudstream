@@ -22,3 +22,9 @@ internal fun resolveSearchFocusTarget(
     hasQuery && !isAdvancedSearch && hasStandardResults -> SearchFocusTarget.STANDARD_RESULTS
     else -> SearchFocusTarget.NONE
 }
+
+internal fun canMoveSearchFocus(
+    sourceHasFocus: Boolean,
+    targetVisible: Boolean,
+    targetHasItems: Boolean,
+): Boolean = sourceHasFocus && targetVisible && targetHasItems

@@ -18,6 +18,7 @@ import com.lagradost.cloudstream3.ui.ViewHolderState
 import com.lagradost.cloudstream3.ui.newSharedPool
 import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
+import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_FOCUSED
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_LOAD
 import com.lagradost.cloudstream3.ui.search.SearchClickCallback
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
@@ -40,6 +41,7 @@ open class ParentItemAdapter(
     private val moreInfoClickCallback: (HomeViewModel.ExpandableHomepageList) -> Unit,
     private val expandCallback: ((String) -> Unit)? = null,
     private val primaryAction: Int = SEARCH_ACTION_LOAD,
+    private val focusTargetCallback: ((HomeFocusRestoreTarget) -> Unit)? = null,
 ) : BaseAdapter<HomeViewModel.ExpandableHomepageList, Bundle>(
     id,
     diffCallback = BaseDiffCallback(
@@ -52,6 +54,11 @@ open class ParentItemAdapter(
         val sharedPool =
             newSharedPool { setMaxRecycledViews(CONTENT, 4) }
     }
+
+    private var pendingFocusRestore: HomeFocusRestoreTarget? = null
+    private var focusRestoreRecyclerView: RecyclerView? = null
+    private var focusRestoreCompletion: ((HomeFocusRestoreTarget) -> Unit)? = null
+    private var focusRestoreAttemptPosted = false
 
     data class ParentItemHolder(val binding: ViewBinding) : ViewHolderState<Bundle>(binding) {
         var itemKey: String? = null
@@ -75,11 +82,146 @@ open class ParentItemAdapter(
     protected override fun stateKey(holder: ViewHolderState<Bundle>): Any? =
         (holder as? ParentItemHolder)?.itemKey ?: super.stateKey(holder)
 
+    fun restoreFocus(
+        recyclerView: RecyclerView,
+        target: HomeFocusRestoreTarget,
+        onComplete: ((HomeFocusRestoreTarget) -> Unit)? = null,
+    ) {
+        pendingFocusRestore = target
+        focusRestoreRecyclerView = recyclerView
+        focusRestoreCompletion = onComplete
+        setChildAutomaticFocusRestore(recyclerView, enabled = false)
+        scheduleFocusRestore()
+    }
+
+    private fun orderedItems(): List<HomeViewModel.ExpandableHomepageList> =
+        immutableCurrentList.sortedBy { it.list.list.isEmpty() }
+
+    private fun scheduleFocusRestore() {
+        val recyclerView = focusRestoreRecyclerView ?: return
+        if (pendingFocusRestore == null || !recyclerView.isAttachedToWindow) return
+        if (focusRestoreAttemptPosted) return
+
+        focusRestoreAttemptPosted = true
+        recyclerView.post {
+            focusRestoreAttemptPosted = false
+            attemptFocusRestore()
+        }
+    }
+
+    private fun attemptFocusRestore() {
+        val target = pendingFocusRestore ?: return
+        val recyclerView = focusRestoreRecyclerView ?: return
+        val items = orderedItems()
+        if (items.isEmpty()) return
+
+        val categories = items.map { item ->
+            HomeFocusRestoreCategory(
+                key = item.list.name,
+                cardKeys = item.list.list.map(::homeFocusKey),
+            )
+        }
+        val selection = HomeFocusRestorePlanner.select(categories, target)
+        if (selection == null) {
+            completeFocusRestore()
+            return
+        }
+
+        val parentAdapterPosition = HomeFocusRestorePlanner.adapterPosition(
+            selection.categoryIndex,
+            headers,
+        )
+        recyclerView.scrollToPosition(parentAdapterPosition)
+
+        val parentHolder = recyclerView.findViewHolderForAdapterPosition(parentAdapterPosition)
+            as? ParentItemHolder ?: run {
+            scheduleFocusRestore()
+            return
+        }
+        val binding = parentHolder.binding as? HomepageParentBinding ?: run {
+            completeFocusRestore()
+            return
+        }
+        val childRecyclerView = binding.homeChildRecyclerview
+        val childAdapter = childRecyclerView.adapter as? HomeChildItemAdapter ?: run {
+            scheduleFocusRestore()
+            return
+        }
+        childAdapter.automaticFocusRestoreEnabled = false
+
+        val category = items[selection.categoryIndex]
+        val sourceKeys = category.list.list.map(::homeFocusKey)
+        val childKeys = childAdapter.immutableCurrentList.map(::homeFocusKey)
+        if (sourceKeys != childKeys) {
+            childRecyclerView.post { scheduleFocusRestore() }
+            return
+        }
+
+        val targetKey = sourceKeys.getOrNull(selection.cardIndex) ?: run {
+            completeFocusRestore()
+            return
+        }
+        val childPosition = childAdapter.immutableCurrentList.indexOfFirst {
+            homeFocusKey(it) == targetKey
+        }
+        if (childPosition < 0) {
+            childRecyclerView.post { scheduleFocusRestore() }
+            return
+        }
+
+        childRecyclerView.scrollToPosition(childPosition)
+        val childHolder = childRecyclerView.findViewHolderForAdapterPosition(childPosition)
+            ?: run {
+                childRecyclerView.post { scheduleFocusRestore() }
+                return
+            }
+
+        if (childHolder.itemView.hasFocus() || childHolder.itemView.requestFocus()) {
+            completeFocusRestore()
+        } else {
+            childRecyclerView.post { scheduleFocusRestore() }
+        }
+    }
+
+    private fun setChildAutomaticFocusRestore(recyclerView: RecyclerView, enabled: Boolean) {
+        for (index in 0 until recyclerView.childCount) {
+            val holder = recyclerView.getChildViewHolder(recyclerView.getChildAt(index))
+                as? ParentItemHolder ?: continue
+            val childAdapter = (holder.binding as? HomepageParentBinding)
+                ?.homeChildRecyclerview?.adapter as? HomeChildItemAdapter ?: continue
+            childAdapter.automaticFocusRestoreEnabled = enabled
+            if (enabled) childAdapter.clearSavedFocusStates()
+        }
+    }
+
+    private fun completeFocusRestore() {
+        val target = pendingFocusRestore ?: return
+        val recyclerView = focusRestoreRecyclerView
+        pendingFocusRestore = null
+        focusRestoreRecyclerView = null
+        recyclerView?.let { setChildAutomaticFocusRestore(it, enabled = true) }
+        val completion = focusRestoreCompletion
+        focusRestoreCompletion = null
+        completion?.invoke(target)
+    }
+
+    private fun childClickCallback(categoryKey: String): (SearchClickCallback) -> Unit = { callback ->
+        if (callback.action != SEARCH_ACTION_FOCUSED) {
+            focusTargetCallback?.invoke(
+                HomeFocusRestoreTarget(categoryKey, homeFocusKey(callback.card))
+            )
+        }
+        clickCallback(callback)
+    }
+
     override fun submitList(
         list: Collection<HomeViewModel.ExpandableHomepageList>?,
         commitCallback: Runnable?
     ) {
-        super.submitList(list?.sortedBy { it.list.list.isEmpty() }, commitCallback)
+        super.submitList(list?.sortedBy { it.list.list.isEmpty() }, Runnable {
+            commitCallback?.run()
+            scheduleFocusRestore()
+        })
     }
 
     override fun onUpdateContent(
@@ -89,7 +231,10 @@ open class ParentItemAdapter(
     ) {
         val binding = holder.view
         if (binding !is HomepageParentBinding) return
-        (binding.homeChildRecyclerview.adapter as? HomeChildItemAdapter)?.submitList(item.list.list)
+        (binding.homeChildRecyclerview.adapter as? HomeChildItemAdapter)?.apply {
+            automaticFocusRestoreEnabled = pendingFocusRestore == null
+            submitList(item.list.list, Runnable { scheduleFocusRestore() })
+        }
     }
 
     override fun onBindContent(
@@ -102,6 +247,10 @@ open class ParentItemAdapter(
         val binding = holder.view
         if (binding !is HomepageParentBinding) return
         val info = item.list
+        android.util.Log.d(
+            "HomeFocusTrace",
+            "parent-bind adapterPosition=$position category=${info.name} pending=${pendingFocusRestore != null}"
+        )
         (holder as? ParentItemHolder)?.itemKey = info.name
         binding.apply {
             val currentAdapter = homeChildRecyclerview.adapter as? HomeChildItemAdapter
@@ -109,24 +258,26 @@ open class ParentItemAdapter(
                 homeChildRecyclerview.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
                 homeChildRecyclerview.adapter = HomeChildItemAdapter(
                     id = 31 * id + info.name.hashCode(),
-                    clickCallback = clickCallback,
+                    clickCallback = childClickCallback(info.name),
                     nextFocusUp = homeChildRecyclerview.nextFocusUpId,
                     nextFocusDown = homeChildRecyclerview.nextFocusDownId,
                     primaryAction = primaryAction,
                 ).apply {
+                    automaticFocusRestoreEnabled = pendingFocusRestore == null
                     isHorizontal = info.isHorizontalImages
                     hasNext = item.hasNext
-                    submitList(item.list.list)
+                    submitList(item.list.list, Runnable { scheduleFocusRestore() })
                 }
             } else {
                 currentAdapter.apply {
+                    automaticFocusRestoreEnabled = pendingFocusRestore == null
                     isHorizontal = info.isHorizontalImages
                     hasNext = item.hasNext
-                    this.clickCallback = this@ParentItemAdapter.clickCallback
+                    this.clickCallback = childClickCallback(info.name)
                     primaryAction = this@ParentItemAdapter.primaryAction
                     nextFocusUp = homeChildRecyclerview.nextFocusUpId
                     nextFocusDown = homeChildRecyclerview.nextFocusDownId
-                    submitIncomparableList(item.list.list)
+                    submitIncomparableList(item.list.list, Runnable { scheduleFocusRestore() })
                 }
             }
 
@@ -174,6 +325,7 @@ open class ParentItemAdapter(
                     moreInfoClickCallback.invoke(item)
                 }
             }
+            scheduleFocusRestore()
         }
     }
 

@@ -604,6 +604,23 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
         return super.onCreateView(inflater, container, savedInstanceState)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (!isLayout(TV or EMULATOR)) return
+
+        val target = pendingHomeFocusRestore ?: return
+        android.util.Log.d("HomeFocusTrace", "onResume target=${target.categoryKey}/${target.itemKey}")
+        val homeBinding = binding ?: return
+        homeMasterAdapter?.restoreFocus(
+            homeBinding.homeMasterRecycler,
+            target,
+        ) { completedTarget ->
+            if (pendingHomeFocusRestore == completedTarget) {
+                pendingHomeFocusRestore = null
+            }
+        }
+    }
+
     override fun onDestroyView() {
         (activity as? ComponentActivity)?.detachBackPressedCallback("HomeFragment_BackPress")
         bottomSheetDialog?.ownHide()
@@ -628,6 +645,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
     private var bottomSheetDialog: BottomSheetDialog? = null
     private var homeMasterAdapter: HomeParentItemAdapterPreview? = null
+    private var pendingHomeFocusRestore: HomeFocusRestoreTarget? = null
 
     var lastSavedHomepage: String? = null
 
@@ -685,7 +703,13 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             }
 
             homeMasterAdapter = HomeParentItemAdapterPreview(
-                homeViewModel, accountViewModel
+                homeViewModel,
+                accountViewModel,
+                focusTargetCallback = { target ->
+                    if (isLayout(TV or EMULATOR)) {
+                        pendingHomeFocusRestore = target
+                    }
+                },
             )
             homeMasterRecycler.setRecycledViewPool(ParentItemAdapter.sharedPool)
             homeMasterRecycler.adapter = homeMasterAdapter

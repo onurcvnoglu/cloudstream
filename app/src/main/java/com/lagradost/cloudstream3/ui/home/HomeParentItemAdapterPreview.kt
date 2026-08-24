@@ -64,7 +64,8 @@ import com.lagradost.cloudstream3.ui.setRecycledViewPool
 
 class HomeParentItemAdapterPreview(
     private val viewModel: HomeViewModel,
-    private val accountViewModel: AccountViewModel
+    private val accountViewModel: AccountViewModel,
+    focusTargetCallback: ((HomeFocusRestoreTarget) -> Unit)? = null,
 ) : ParentItemAdapter(
     id = "HomeParentItemAdapterPreview".hashCode(),
     clickCallback = {
@@ -73,7 +74,7 @@ class HomeParentItemAdapterPreview(
         viewModel.popup(it)
     }, expandCallback = {
         viewModel.expand(it)
-    }, primaryAction = SEARCH_ACTION_SHOW_METADATA) {
+    }, primaryAction = SEARCH_ACTION_SHOW_METADATA, focusTargetCallback = focusTargetCallback) {
     override val headers = 1
     override fun onCreateHeader(parent: ViewGroup): ViewHolderState<Bundle> {
         val inflater = LayoutInflater.from(parent.context)
