@@ -604,14 +604,16 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
         return super.onCreateView(inflater, container, savedInstanceState)
     }
 
-    override fun onResume() {
-        super.onResume()
+    private fun restorePendingHomeFocus() {
         if (!isLayout(TV or EMULATOR)) return
 
         val target = pendingHomeFocusRestore ?: return
-        android.util.Log.d("HomeFocusTrace", "onResume target=${target.categoryKey}/${target.itemKey}")
         val homeBinding = binding ?: return
-        homeMasterAdapter?.restoreFocus(
+        val adapter = homeMasterAdapter ?: return
+        if (!homeBinding.homeMasterRecycler.isAttachedToWindow ||
+            adapter.immutableCurrentList.isEmpty()
+        ) return
+        adapter.restoreFocus(
             homeBinding.homeMasterRecycler,
             target,
         ) { completedTarget ->
@@ -621,9 +623,16 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        restorePendingHomeFocus()
+    }
+
     override fun onDestroyView() {
         (activity as? ComponentActivity)?.detachBackPressedCallback("HomeFragment_BackPress")
+        homeMasterAdapter?.cancelFocusRestore()
         bottomSheetDialog?.ownHide()
+        homepageSnapshots = emptyMap()
         super.onDestroyView()
     }
 
@@ -646,8 +655,30 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
     private var bottomSheetDialog: BottomSheetDialog? = null
     private var homeMasterAdapter: HomeParentItemAdapterPreview? = null
     private var pendingHomeFocusRestore: HomeFocusRestoreTarget? = null
+    private var homepageSnapshots:
+        Map<String, HomeViewModel.ExpandableHomepageList> = emptyMap()
 
     var lastSavedHomepage: String? = null
+
+    private fun snapshotHomepageLists(
+        values: Collection<HomeViewModel.ExpandableHomepageList>
+    ): List<HomeViewModel.ExpandableHomepageList> {
+        val snapshots = values.map { value ->
+            val previous = homepageSnapshots[value.list.name]
+            if (previous != null &&
+                previous.currentPage == value.currentPage &&
+                previous.hasNext == value.hasNext &&
+                previous.list.isHorizontalImages == value.list.isHorizontalImages &&
+                previous.list.list == value.list.list
+            ) {
+                previous
+            } else {
+                value.copy(list = value.list.copy(list = value.list.list.toList()))
+            }
+        }
+        homepageSnapshots = snapshots.associateBy { it.list.name }
+        return snapshots
+    }
 
     fun saveHomepageToTV(page: Map<String, HomeViewModel.ExpandableHomepageList>) {
         // No need to update for phone
@@ -832,11 +863,10 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 when (data) {
                     is Resource.Success -> {
                         val d = data.value
-                        (homeMasterRecycler.adapter as? ParentItemAdapter)?.submitList(d.values.map {
-                            it.copy(
-                                list = it.list.copy(list = it.list.list.toMutableList())
-                            )
-                        })
+                        (homeMasterRecycler.adapter as? ParentItemAdapter)?.submitList(
+                            snapshotHomepageLists(d.values),
+                            Runnable { restorePendingHomeFocus() }
+                        )
 
                         saveHomepageToTV(d)
 
@@ -916,6 +946,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                             submitList(null)
                             clearState()
                         }
+                        homepageSnapshots = emptyMap()
                     }
 
                     is Resource.Loading -> {
@@ -927,6 +958,7 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                             submitList(null)
                             clearState()
                         }
+                        homepageSnapshots = emptyMap()
                         //home_loaded?.isVisible = false
                     }
                 }

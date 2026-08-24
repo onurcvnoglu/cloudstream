@@ -49,6 +49,36 @@ class HomeFocusRestoreTest {
     }
 
     @Test
+    fun `new target is selected from the committed category snapshot`() {
+        val committedCategories = listOf(
+            HomeFocusRestoreCategory("A", listOf("a1")),
+            HomeFocusRestoreCategory("B", listOf("b1", "b2")),
+        )
+
+        val selection = HomeFocusRestorePlanner.select(
+            committedCategories,
+            HomeFocusRestoreTarget("B", "b2"),
+        )
+
+        assertEquals(HomeFocusRestoreSelection(categoryIndex = 1, cardIndex = 1), selection)
+    }
+
+    @Test
+    fun `deleted target falls back to the first card only once`() {
+        val categories = listOf(
+            HomeFocusRestoreCategory("A", listOf("a1", "a2")),
+            HomeFocusRestoreCategory("B", listOf("b1")),
+        )
+        val target = HomeFocusRestoreTarget("B", "deleted")
+
+        val selection = HomeFocusRestorePlanner.select(categories, target)
+        val retrySelection = HomeFocusRestorePlanner.select(categories, target)
+
+        assertEquals(HomeFocusRestoreSelection(categoryIndex = 1, cardIndex = 0), selection)
+        assertEquals(selection, retrySelection)
+    }
+
+    @Test
     fun `no accessible category produces no restore selection`() {
         val selection = HomeFocusRestorePlanner.select(
             listOf(

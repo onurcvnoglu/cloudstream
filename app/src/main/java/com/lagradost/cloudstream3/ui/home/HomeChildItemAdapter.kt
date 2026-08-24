@@ -178,14 +178,6 @@ open class HomeChildItemAdapter(
         })
     }
 
-    override fun submitIncomparableList(list: List<SearchResponse>?, commitCallback: Runnable?) {
-        prepareFocusFallback(list)
-        super.submitList(null, null)
-        super.submitList(list, Runnable {
-            commitCallback?.run()
-        })
-    }
-
     override fun onCreateContent(parent: ViewGroup): ViewHolderState<Boolean> {
         val expanded = parent.context.isBottomLayout()
         val inflater = LayoutInflater.from(parent.context)
@@ -247,10 +239,6 @@ open class HomeChildItemAdapter(
         item: SearchResponse,
         position: Int
     ) {
-        android.util.Log.d(
-            "HomeFocusTrace",
-            "child-bind position=$position item=${item.name} restore=$automaticFocusRestoreEnabled"
-        )
         applyBinding(holder, position == 0)
         (holder as? HomeScrollViewHolderState)?.apply {
             itemKey = focusKey(item)

@@ -62,8 +62,8 @@ minSdk = "23"
 compileSdk = "37"
 targetSdk = "36"
 
-versionCode = "71"
-versionName = "6.0.3"
+versionCode = "72"
+versionName = "6.0.4"
 
 [libraries]
 activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "activityKtx" }

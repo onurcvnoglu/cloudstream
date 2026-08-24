@@ -232,48 +232,69 @@ class HomeViewModel : ViewModel() {
     val lock: MutableSet<String> = mutableSetOf()
 
     suspend fun expandAndReturn(name: String): ExpandableHomepageList? {
-        if (lock.contains(name)) return null
-        lock += name
+        if (!lock.add(name)) return null
 
-        repo?.apply {
-            waitForHomeDelay()
+        return try {
+            repo?.apply {
+                waitForHomeDelay()
 
-            expandable[name]?.let { current ->
-                debugAssert({ !current.hasNext }) {
-                    "Expand called when not needed"
-                }
+                expandable[name]?.let { current ->
+                    debugAssert({ !current.hasNext }) {
+                        "Expand called when not needed"
+                    }
 
-                val nextPage = current.currentPage + 1
-                val next = getMainPage(nextPage, mainPage.indexOfFirst { it.name == name })
-                if (next is Resource.Success) {
-                    next.value.filterNotNull().forEach { main ->
-                        main.items.forEach { newList ->
-                            val key = newList.name
-                            expandable[key]?.apply {
-                                hasNext = main.hasNext
-                                currentPage = nextPage
+                    val nextPage = current.currentPage + 1
+                    val next = getMainPage(nextPage, mainPage.indexOfFirst { it.name == name })
+                    var changed = false
+                    if (next is Resource.Success) {
+                        next.value.filterNotNull().forEach { main ->
+                            main.items.forEach { newList ->
+                                val key = newList.name
+                                expandable[key]?.let { expanded ->
+                                    val previousPage = expanded.currentPage
+                                    val previousHasNext = expanded.hasNext
+                                    val existingUrls = expanded.list.list
+                                        .asSequence()
+                                        .map { it.url }
+                                        .toHashSet()
+                                    val additions = newList.list.filter { existingUrls.add(it.url) }
 
-                                debugWarning({ newList.list.any { outer -> this.list.list.any { it.url == outer.url } } }) {
-                                    "Expanded contained an item that was previously already in the list\n${list.name} = ${this.list.list}\n${newList.name} = ${newList.list}"
+                                    if (additions.size != newList.list.size) {
+                                        debugWarning({ true }) {
+                                            "Expanded contained duplicate items\n${expanded.list.name} = ${expanded.list.list}\n${newList.name} = ${newList.list}"
+                                        }
+                                    }
+
+                                    expanded.hasNext = main.hasNext
+                                    expanded.currentPage = nextPage
+                                    if (additions.isNotEmpty()) {
+                                        expanded.list = expanded.list.copy(
+                                            list = expanded.list.list + additions
+                                        )
+                                    }
+                                    changed = changed ||
+                                            previousPage != expanded.currentPage ||
+                                            previousHasNext != expanded.hasNext ||
+                                            additions.isNotEmpty()
+                                } ?: debugWarning {
+                                    "Expanded an item not in main load named $key, current list is ${expandable.keys}"
                                 }
-
-                                this.list.list += newList.list
-                                this.list.list.distinctBy { it.url } // just to be sure we are not adding the same shit for some reason
-                            } ?: debugWarning {
-                                "Expanded an item not in main load named $key, current list is ${expandable.keys}"
                             }
                         }
+                    } else if (current.hasNext) {
+                        current.hasNext = false
+                        changed = true
                     }
-                } else {
-                    current.hasNext = false
+
+                    if (changed) {
+                        _page.postValue(Resource.Success(expandable.toMap()))
+                    }
                 }
             }
-            _page.postValue(Resource.Success(expandable))
+            expandable[name]
+        } finally {
+            lock.remove(name)
         }
-
-        lock -= name
-
-        return expandable[name]
     }
 
     // this is soo over engineered, but idk how I can make it clean without making the main api harder to use :pensive:
@@ -349,9 +370,7 @@ class HomeViewModel : ViewModel() {
                             expandable[list.name] =
                                 ExpandableHomepageList(
                                     filteredList.copy(
-                                        list = CopyOnWriteArrayList(
-                                            filteredList.list
-                                        )
+                                        list = filteredList.list.toList()
                                     ), 1, home.hasNext
                                 )
                         }
@@ -396,7 +415,7 @@ class HomeViewModel : ViewModel() {
                     } else {
                         _preview.postValue(Resource.Success((previewResponsesAdded.size < currentShuffledList.size) to previewResponses))
                     }
-                    _page.postValue(Resource.Success(expandable))
+                    _page.postValue(Resource.Success(expandable.toMap()))
                 } catch (e: Exception) {
                     _randomItems.postValue(emptyList())
                     logError(e)
