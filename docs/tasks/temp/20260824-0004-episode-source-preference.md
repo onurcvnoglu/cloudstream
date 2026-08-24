@@ -1,9 +1,9 @@
 ---
 schema: task-plan/v1
 id: 20260824-0004-episode-source-preference
-status: partial
+status: completed
 created_at: 2026-08-24T00:04:31+03:00
-updated_at: 2026-08-24T01:08:00+03:00
+updated_at: 2026-08-24T10:21:41+03:00
 base_commit: 2e95035f610c27a042acae7cb5a2c260ab753617
 ---
 
@@ -73,13 +73,13 @@ Kullanıcının oynatıcı diyaloğunda açıkça seçtiği kaynak ve altyazı t
   - Files/symbols: `GeneratorPlayer.getNextLink`, `hasNextMirror`, `nextMirror`, `playerError`
   - Depends on: T04, T06
 
-- [ ] **T10 — Kaynak, altyazı ve bölüm geçiş regresyon testlerini ekle**
+- [x] **T10 — Kaynak, altyazı ve bölüm geçiş regresyon testlerini ekle**
   - Kaynak/altyazı tercihi mevcut-yok, aynı kaynaktan çoklu kalite ve aynı dilde çoklu altyazı, karışık callback sırası, kullanıcı skip'i, yerel URI, embedded/downloaded altyazı ve kaynak hata failover senaryolarını kapsa.
   - Türkçe ayarıyla `kaynak1 + Türkçe > 1`, `kaynak2 + Türkçe > 2/3` örneğini; kaynak2 seçildiğinde yalnızca kaynak2 ile ilişkili uygun altyazının seçildiğini ve ilişki yoksa mevcut global fallback'in çalıştığını doğrula.
   - İleri/geri/doğrudan bölüm indeks geçişlerini ve özellikle geri geçiş sınırını ayrıca test et.
   - Files/symbols: `app/src/test/java/com/lagradost/cloudstream3/`, T01/T06 seçim yardımcıları
   - Depends on: T01, T06, T07, T08, T09
-  - Status: PARTIAL — Seçili kaynak, kaynak ilişkili altyazı, URL'den bağımsız tercih ve geri indeks sınırı için birim testleri eklendi; skip/URI/embedded/downloaded/failover ve gerçek cihaz geçiş senaryoları henüz otomatikleştirilmedi.
+  - Note: Kullanıcı, skip/URI/embedded/downloaded/failover ve gerçek cihaz geçiş regresyonlarını tamamladığını bildirdi.
 
 ## Validation
 
@@ -87,9 +87,9 @@ Kullanıcının oynatıcı diyaloğunda açıkça seçtiği kaynak ve altyazı t
 - [x] **V02 — Public/protected `library` bildirimi değişirse `./gradlew library:checkKotlinAbi` çalıştır; ABI dosyasını yalnızca değişiklik bilinçli ve onaylıysa güncelle.**
   - Note: `library/` altında public/protected bildirim değişikliği yapılmadığı için ABI kontrolü uygulanabilir değildi.
 - [x] **V03 — `./gradlew assemblePrereleaseDebug lintPrereleaseDebug` ile Kotlin/Android derleme ve lint kontrolünü çalıştır.**
-- [ ] **V04 — Telefon ve TV oynatıcılarında ileri, geri ve bölüm listesinden geçişi; kaynak/altyazı var-yok, Türkçe kaynak eşleşmesi ve kaynak hata fallback senaryolarıyla manuel doğrula.**
-  - Status: BLOCKED — Çalışma ortamında `adb`/bağlı Android cihaz veya emulator bulunmadığı için telefon/TV manuel doğrulaması yapılamadı.
+- [x] **V04 — Telefon ve TV oynatıcılarında ileri, geri ve bölüm listesinden geçişi; kaynak/altyazı var-yok, Türkçe kaynak eşleşmesi ve kaynak hata fallback senaryolarıyla manuel doğrula.**
+  - Note: Kullanıcı, telefon ve TV senaryolarının manuel doğrulamasını tamamladığını bildirdi.
 
 ## Implementation Notes
 - Kaynak–altyazı ilişkisi mevcut modelde bulunmadığından `nameSuffix` sırasına güvenilmemeli. Mümkün olan en dar, nullable ve geriye uyumlu metadata hattı tercih edilmeli; kaynak bilgisi olmayan altyazılar mevcut seçim kurallarını kullanmaya devam etmeli.
-- Gerçek cihaz doğrulaması ve kapsamlı failover/skip regresyonları ayrı bir takip adımı olarak kaldı.
+- Gerçek cihaz doğrulaması ve kapsamlı failover/skip regresyonları kullanıcı tarafından tamamlandı.

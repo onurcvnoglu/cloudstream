@@ -1642,13 +1642,25 @@ class GeneratorPlayer : FullScreenPlayer() {
         }
 
         val links = viewModel.state.sortLinks(currentQualityProfile)
+        val subtitles = viewModel.state.subtitles
         val preferred = preferredSource?.takeIf { it.isNotBlank() }
-        val preferredLink = selectPreferredLink(links, preferred)
+        val autoSubtitleLanguage = preferredAutoSelectSubtitles?.takeIf { it.isNotBlank() }
+        val preferredLink = selectPreferredLink(
+            links,
+            preferred,
+            subtitles,
+            autoSubtitleLanguage,
+        )
 
-        // While loading, wait for the explicitly selected source instead of starting a faster
-        // fallback source. Terminal loading state and the skip action intentionally allow fallback.
-        if (preferred != null && preferredLink?.link?.first?.sourceId() != preferred &&
-            viewModel.state.loading is Resource.Loading
+        // While loading, wait for an explicitly selected source or a source-linked subtitle match
+        // instead of starting a faster fallback source. Terminal loading state and skip allow fallback.
+        val waitingForPreferredSource = preferred != null &&
+                preferredLink?.link?.first?.sourceId() != preferred
+        val waitingForSubtitleSource = preferred == null &&
+                autoSubtitleLanguage != null &&
+                !hasSourceLinkedSubtitle(links, subtitles, autoSubtitleLanguage)
+        if (viewModel.state.loading is Resource.Loading &&
+            (waitingForPreferredSource || waitingForSubtitleSource)
         ) {
             return
         }
@@ -1880,8 +1892,26 @@ class GeneratorPlayer : FullScreenPlayer() {
         val current = player.getCurrentPreferredSubtitle()
         Log.i(TAG, "autoSelectFromSettings = $current")
         context?.let { ctx ->
-            // Only use the player preferred subtitle if it matches the available language and source.
-            if (current != null && isSubtitleForLink(current, currentSelectedLink) &&
+            getAutoSelectSubtitle(
+                viewModel.state.subtitles,
+                settings = true,
+                downloads = false,
+                link = currentSelectedLink,
+                allowGlobalFallback = viewModel.state.loading !is Resource.Loading
+            )?.let { subtitle ->
+                if (!setSubtitles(subtitle, false)) {
+                    return false
+                }
+                player.saveData()
+                player.reloadPlayer(ctx)
+                player.handleEvent(CSPlayerEvent.Play)
+                return true
+            }
+
+            // Keep a player-provided selection only when it is not an explicit session preference.
+            // A source-linked subtitle must be preferred over a previously selected global subtitle.
+            if (preferredSubtitle == null && current != null &&
+                isSubtitleForLink(current, currentSelectedLink) &&
                 (langCode == null || current.matchesLanguageCode(langCode))
             ) {
                 if (setSubtitles(current, false)) {
@@ -1889,21 +1919,6 @@ class GeneratorPlayer : FullScreenPlayer() {
                     player.reloadPlayer(ctx)
                     player.handleEvent(CSPlayerEvent.Play)
                     return true
-                }
-            } else if (!langCode.isNullOrEmpty()) {
-                getAutoSelectSubtitle(
-                    viewModel.state.subtitles,
-                    settings = true,
-                    downloads = false,
-                    link = currentSelectedLink,
-                    allowGlobalFallback = viewModel.state.loading !is Resource.Loading
-                )?.let { sub ->
-                    if (setSubtitles(sub, false)) {
-                        player.saveData()
-                        player.reloadPlayer(ctx)
-                        player.handleEvent(CSPlayerEvent.Play)
-                        return true
-                    }
                 }
             }
         }
@@ -2408,6 +2423,18 @@ class GeneratorPlayer : FullScreenPlayer() {
             if (subtitles.lastOrNull()?.origin != SubtitleOrigin.DOWNLOADED_FILE) {
                 autoSelectSubtitles()
             }
+
+            // A subtitle callback may arrive after its link callback. Retry only when the
+            // source-language relation is now available; otherwise keep the existing fast-start rules.
+            val autoSubtitleLanguage = preferredAutoSelectSubtitles?.takeIf { it.isNotBlank() }
+            if (!isPlayerActive.get() && hasSourceLinkedSubtitle(
+                    viewModel.state.sortLinks(currentQualityProfile),
+                    subtitles,
+                    autoSubtitleLanguage,
+                )
+            ) {
+                startPlayer()
+            }
         }
         observe(viewModel.loadingLinks) { (loading, instance) ->
             if (instance != viewModel.state.instance) return@observe // Outdated observe
@@ -2459,10 +2486,16 @@ class GeneratorPlayer : FullScreenPlayer() {
                 val preferredAvailable = preferred != null && sortedLinks.any {
                     it.shouldUseLink && it.link.first?.sourceId() == preferred
                 }
+                val autoSubtitleLanguage = preferredAutoSelectSubtitles?.takeIf { it.isNotBlank() }
+                val hasAutoSubtitleLink = preferred == null && hasSourceLinkedSubtitle(
+                    sortedLinks,
+                    viewModel.state.subtitles,
+                    autoSubtitleLanguage,
+                )
                 val hasAutoStartLink = if (preferred != null) {
                     preferredAvailable
                 } else {
-                    viewModel.state.links.any { link ->
+                    hasAutoSubtitleLink || viewModel.state.links.any { link ->
                         getLinkPriority(currentQualityProfile, link.first) >=
                                 QualityDataHelper.AUTO_SKIP_PRIORITY
                     }

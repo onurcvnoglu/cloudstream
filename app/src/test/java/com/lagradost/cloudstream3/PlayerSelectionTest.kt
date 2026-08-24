@@ -4,6 +4,7 @@ import com.lagradost.cloudstream3.ui.player.DisplayLink
 import com.lagradost.cloudstream3.ui.player.SubtitleData
 import com.lagradost.cloudstream3.ui.player.SubtitleOrigin
 import com.lagradost.cloudstream3.ui.player.SubtitlePreference
+import com.lagradost.cloudstream3.ui.player.hasSourceLinkedSubtitle
 import com.lagradost.cloudstream3.ui.player.selectPreferredLink
 import com.lagradost.cloudstream3.ui.player.previousEpisodeIndex
 import com.lagradost.cloudstream3.ui.player.selectPreferredSubtitle
@@ -28,6 +29,7 @@ class PlayerSelectionTest {
     private fun subtitle(
         name: String,
         source: String?,
+        languageCode: String = "tr",
         origin: SubtitleOrigin = SubtitleOrigin.URL,
     ) = SubtitleData(
         originalName = name,
@@ -36,7 +38,7 @@ class PlayerSelectionTest {
         origin = origin,
         mimeType = "text/vtt",
         headers = emptyMap(),
-        languageCode = "tr",
+        languageCode = languageCode,
         source = source,
     )
 
@@ -51,6 +53,56 @@ class PlayerSelectionTest {
         assertEquals("source2", selectPreferredLink(links, "source2")?.link?.first?.source)
         assertEquals("source1", selectPreferredLink(links, "")?.link?.first?.source)
         assertEquals("source1", selectPreferredLink(links, "missing")?.link?.first?.source)
+    }
+
+    @Test
+    fun `subtitle language selects the first matching source in sorted order`() {
+        val links = listOf(
+            DisplayLink(link("source1") to null, shouldUseLink = true, priority = 100),
+            DisplayLink(link("source2") to null, shouldUseLink = true, priority = 90),
+            DisplayLink(link("source3") to null, shouldUseLink = true, priority = 80),
+        )
+        val subtitles = listOf(
+            subtitle("English", "source1", languageCode = "en"),
+            subtitle("Türkçe", "source2"),
+            subtitle("Türkçe", "source3"),
+        )
+
+        assertEquals(
+            "source2",
+            selectPreferredLink(links, null, subtitles, "tr")?.link?.first?.source
+        )
+        assertEquals(
+            "source2",
+            selectPreferredLink(links, "source2", subtitles, "en")?.link?.first?.source
+        )
+    }
+
+    @Test
+    fun `source-linked language matching ignores unusable and unrelated subtitles`() {
+        val links = listOf(
+            DisplayLink(link("hidden") to null, shouldUseLink = false, priority = 100),
+            DisplayLink(link("source1") to null, shouldUseLink = true, priority = 90),
+            DisplayLink(link("source2") to null, shouldUseLink = true, priority = 80),
+        )
+        val subtitles = listOf(
+            subtitle("Türkçe", "hidden"),
+            subtitle("Türkçe", null),
+            subtitle("İndirilen Türkçe", null, origin = SubtitleOrigin.DOWNLOADED_FILE),
+        )
+
+        assertEquals(
+            "source1",
+            selectPreferredLink(links, null, subtitles, "tr")?.link?.first?.source
+        )
+        assertEquals(
+            "source1",
+            selectPreferredLink(links, null, subtitles, "en")?.link?.first?.source
+        )
+        assertEquals(
+            false,
+            hasSourceLinkedSubtitle(links, subtitles, "tr")
+        )
     }
 
     @Test

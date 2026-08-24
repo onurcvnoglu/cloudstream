@@ -12,14 +12,43 @@ internal fun ExtractorLink.sourceId(): String? {
  */
 internal fun selectPreferredLink(
     links: List<DisplayLink>,
-    preferredSource: String?
+    preferredSource: String?,
+    subtitles: Iterable<SubtitleData> = emptyList(),
+    languageTag: String? = null,
 ): DisplayLink? {
     val usableLinks = links.filter { it.shouldUseLink }
     val source = preferredSource?.takeIf { it.isNotBlank() }
 
-    return source?.let { preferred ->
-        usableLinks.firstOrNull { it.link.first?.sourceId() == preferred }
-    } ?: usableLinks.firstOrNull()
+    source?.let { preferred ->
+        usableLinks.firstOrNull { it.link.first?.sourceId() == preferred }?.let { return it }
+    }
+
+    val language = languageTag?.takeIf { it.isNotBlank() }
+    if (source == null && language != null) {
+        usableLinks.firstOrNull { displayLink ->
+            val linkSource = displayLink.link.first?.sourceId() ?: return@firstOrNull false
+            subtitles.any { subtitle ->
+                subtitle.source == linkSource && subtitle.matchesLanguageCode(language)
+            }
+        }?.let { return it }
+    }
+
+    return usableLinks.firstOrNull()
+}
+
+internal fun hasSourceLinkedSubtitle(
+    links: List<DisplayLink>,
+    subtitles: Iterable<SubtitleData>,
+    languageTag: String?,
+): Boolean {
+    val language = languageTag?.takeIf { it.isNotBlank() } ?: return false
+    return links.any { displayLink ->
+        if (!displayLink.shouldUseLink) return@any false
+        val linkSource = displayLink.link.first?.sourceId() ?: return@any false
+        subtitles.any { subtitle ->
+            subtitle.source == linkSource && subtitle.matchesLanguageCode(language)
+        }
+    }
 }
 
 internal data class SubtitlePreference(
