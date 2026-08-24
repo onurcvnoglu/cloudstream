@@ -50,7 +50,8 @@ object SearchResultBuilder {
         itemView: View,
         nextFocusUp: Int? = null,
         nextFocusDown: Int? = null,
-        colorCallback: ((Palette) -> Unit)? = null
+        colorCallback: ((Palette) -> Unit)? = null,
+        primaryAction: Int = SEARCH_ACTION_LOAD
     ) {
         val cardView: ImageView = itemView.findViewById(R.id.imageView)
         val cardText: TextView? = itemView.findViewById(R.id.imageText)
@@ -141,7 +142,7 @@ object SearchResultBuilder {
         fun click(view: View?) {
             clickCallback.invoke(
                 SearchClickCallback(
-                    if (card is DataStoreHelper.ResumeWatchingResult) SEARCH_ACTION_PLAY_FILE else SEARCH_ACTION_LOAD,
+                    if (card is DataStoreHelper.ResumeWatchingResult) SEARCH_ACTION_PLAY_FILE else primaryAction,
                     view ?: return,
                     position,
                     card

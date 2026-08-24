@@ -109,6 +109,7 @@ open class HomeChildItemAdapter(
     id: Int,
     var nextFocusUp: Int? = null,
     var nextFocusDown: Int? = null,
+    var primaryAction: Int = SEARCH_ACTION_LOAD,
     var clickCallback: (SearchClickCallback) -> Unit,
 ) :
     BaseAdapter<SearchResponse, Boolean>(
@@ -222,7 +223,8 @@ open class HomeChildItemAdapter(
             position,
             holder.itemView,
             nextFocusUp,
-            nextFocusDown
+            nextFocusDown,
+            primaryAction = primaryAction
         )
 
         holder.itemView.tag = position

@@ -33,6 +33,7 @@ class SearchClickCallback(
 class SearchAdapter(
     private val resView: AutofitRecyclerView,
     private val isHorizontal:Boolean = false,
+    private val primaryAction: Int = SEARCH_ACTION_LOAD,
     private val clickCallback: (SearchClickCallback) -> Unit,
 ) : NoStateAdapter<SearchResponse>(diffCallback = BaseDiffCallback(itemSame = { a, b ->
     if (a.id != null || b.id != null) {
@@ -94,6 +95,12 @@ class SearchAdapter(
                 imageView.layoutParams = params
             }
         }
-        SearchResultBuilder.bind(clickCallback, item, position, holder.view.root)
+        SearchResultBuilder.bind(
+            clickCallback,
+            item,
+            position,
+            holder.view.root,
+            primaryAction = primaryAction
+        )
     }
 }

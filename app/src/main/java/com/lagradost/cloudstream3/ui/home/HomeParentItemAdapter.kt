@@ -18,6 +18,7 @@ import com.lagradost.cloudstream3.ui.ViewHolderState
 import com.lagradost.cloudstream3.ui.newSharedPool
 import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
+import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_LOAD
 import com.lagradost.cloudstream3.ui.search.SearchClickCallback
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
@@ -38,6 +39,7 @@ open class ParentItemAdapter(
     private val clickCallback: (SearchClickCallback) -> Unit,
     private val moreInfoClickCallback: (HomeViewModel.ExpandableHomepageList) -> Unit,
     private val expandCallback: ((String) -> Unit)? = null,
+    private val primaryAction: Int = SEARCH_ACTION_LOAD,
 ) : BaseAdapter<HomeViewModel.ExpandableHomepageList, Bundle>(
     id,
     diffCallback = BaseDiffCallback(
@@ -104,6 +106,7 @@ open class ParentItemAdapter(
                     clickCallback = clickCallback,
                     nextFocusUp = homeChildRecyclerview.nextFocusUpId,
                     nextFocusDown = homeChildRecyclerview.nextFocusDownId,
+                    primaryAction = primaryAction,
                 ).apply {
                     isHorizontal = info.isHorizontalImages
                     hasNext = item.hasNext
@@ -114,6 +117,7 @@ open class ParentItemAdapter(
                     isHorizontal = info.isHorizontalImages
                     hasNext = item.hasNext
                     this.clickCallback = this@ParentItemAdapter.clickCallback
+                    primaryAction = this@ParentItemAdapter.primaryAction
                     nextFocusUp = homeChildRecyclerview.nextFocusUpId
                     nextFocusDown = homeChildRecyclerview.nextFocusDownId
                     submitIncomparableList(item.list.list)

@@ -53,6 +53,7 @@ import com.lagradost.cloudstream3.ui.account.AccountHelper.showAccountSelectLine
 import com.lagradost.cloudstream3.ui.account.AccountViewModel
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_LOAD
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_PLAY_FILE
+import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_SHOW_METADATA
 import com.lagradost.cloudstream3.ui.search.SearchAdapter
 import com.lagradost.cloudstream3.ui.search.SearchHelper.handleSearchClickCallback
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
@@ -206,7 +207,11 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             binding.homeExpandedRecycler.spanCount = context.getSpanCount(item.isHorizontalImages)
             binding.homeExpandedRecycler.setRecycledViewPool(SearchAdapter.sharedPool)
             binding.homeExpandedRecycler.adapter =
-                SearchAdapter(binding.homeExpandedRecycler,item.isHorizontalImages) { callback ->
+                SearchAdapter(
+                    binding.homeExpandedRecycler,
+                    item.isHorizontalImages,
+                    primaryAction = SEARCH_ACTION_SHOW_METADATA
+                ) { callback ->
                     handleSearchClickCallback(callback)
                     if (callback.action == SEARCH_ACTION_LOAD || callback.action == SEARCH_ACTION_PLAY_FILE) {
                         bottomSheetDialogBuilder.ownHide() // we hide here because we want to resume it later
