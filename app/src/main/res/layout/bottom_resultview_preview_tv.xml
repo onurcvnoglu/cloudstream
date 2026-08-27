@@ -167,7 +167,7 @@
                 android:layout_marginBottom="10dp"
                 android:layout_weight="1"
                 android:nextFocusUp="@id/resultview_preview_favorite"
-                android:nextFocusDown="@id/resultview_preview_more_info"
+                android:nextFocusDown="@id/resultview_preview_translation"
 
                 app:icon="@drawable/ic_baseline_bookmark_24"
                 tools:text="Bookmark">
@@ -176,11 +176,22 @@
             </com.google.android.material.button.MaterialButton>
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/resultview_preview_translation"
+                style="@style/BlackButton"
+                android:layout_width="match_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/translate_description"
+                android:nextFocusUp="@id/resultview_preview_bookmark"
+                android:nextFocusDown="@id/resultview_preview_more_info"
+                android:text="@string/translate_description"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/resultview_preview_more_info"
                 style="@style/WhiteButton"
                 android:layout_width="match_parent"
                 android:layout_weight="1"
-                android:nextFocusUp="@id/resultview_preview_bookmark"
+                android:nextFocusUp="@id/resultview_preview_translation"
                 android:text="@string/home_more_info"
                 app:icon="@drawable/ic_baseline_open_in_new_24" />
         </LinearLayout>

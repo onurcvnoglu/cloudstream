@@ -15,6 +15,7 @@ import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.core.widget.NestedScrollView
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
@@ -46,6 +47,7 @@ import com.lagradost.cloudstream3.ui.setRecycledViewPool
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
+import com.lagradost.cloudstream3.ui.settings.getCurrentLocale
 import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRtl
@@ -72,8 +74,10 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
 ) {
 
     private lateinit var viewModel: ResultViewModel2
+    private val descriptionTranslation = DescriptionTranslationController()
 
     override fun onDestroyView() {
+        descriptionTranslation.cancel()
         updateUIEvent -= ::updateUI
         activity?.detachBackPressedCallback(this@ResultFragmentTv.toString())
         super.onDestroyView()
@@ -327,6 +331,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                 resultResumeSeriesButton to resultResumeSeriesText,
                 resultPlayTrailerButton to resultPlayTrailerText,
                 resultBookmarkButton to resultBookmarkText,
+                resultDescriptionTranslation to resultDescriptionTranslationText,
                 resultFavoriteButton to resultFavoriteText,
                 resultSubscribeButton to resultSubscribeText,
                 resultSearchButton to resultSearchText,
@@ -460,6 +465,7 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
             val aboveCast = listOf(
                 binding.resultEpisodesShow,
                 binding.resultBookmark,
+                binding.resultDescriptionTranslationHolder,
                 binding.resultFavorite,
                 binding.resultSubscribe,
             ).firstOrNull { it.isVisible }
@@ -879,23 +885,64 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                         resultNextAiringTime.setText(d.nextAiringDate)
                         resultPoster.loadImage(d.posterImage, headers = d.posterHeaders)
 
-                        var isExpanded = false
-                        resultDescription.apply {
-                            setTextHtml(d.plotText)
+                        val originalDescription = d.plotText.asString(root.context)
+                        fun renderDescriptionTranslation(state: DescriptionTranslationState) {
+                            when (state) {
+                                is DescriptionTranslationState.Original -> {
+                                    resultDescription.text = state.text.html()
+                                    resultDescriptionTranslationText.setText(R.string.translate_description)
+                                }
+
+                                DescriptionTranslationState.Translating -> {
+                                    resultDescriptionTranslation.isEnabled = false
+                                    resultDescriptionTranslationText.setText(R.string.translating_description)
+                                }
+
+                                is DescriptionTranslationState.Translated -> {
+                                    resultDescription.text = state.text.html()
+                                    resultDescriptionTranslation.isEnabled = true
+                                    resultDescriptionTranslationText.setText(R.string.translation_complete)
+                                }
+
+                                DescriptionTranslationState.Unavailable -> {
+                                    resultDescription.text = originalDescription.html()
+                                    resultDescriptionTranslation.isEnabled = true
+                                    resultDescriptionTranslationText.setText(R.string.translate_description)
+                                    CommonActivity.showToast(R.string.translation_unavailable)
+                                }
+
+                                DescriptionTranslationState.Failed -> {
+                                    resultDescription.text = originalDescription.html()
+                                    resultDescriptionTranslation.isEnabled = true
+                                    resultDescriptionTranslationText.setText(R.string.translate_description)
+                                    CommonActivity.showToast(R.string.translation_failed)
+                                }
+                            }
+                        }
+                        descriptionTranslation.reset(originalDescription, ::renderDescriptionTranslation)
+                        resultDescriptionTranslation.apply {
+                            resultDescriptionTranslationHolder.isVisible = originalDescription.isNotBlank()
                             setOnClickListener {
-                                if (isLayout(EMULATOR)) {
-                                    isExpanded = !isExpanded
-                                    maxLines = if (isExpanded) {
-                                        Integer.MAX_VALUE
-                                    } else 10
-                                } else {
-                                    context?.let { ctx ->
-                                        val builder: AlertDialog.Builder =
-                                            AlertDialog.Builder(ctx, R.style.AlertDialogCustom)
-                                        builder.setMessage(d.plotText.asString(ctx).html())
-                                            .setTitle(d.plotHeaderText.asString(ctx))
-                                            .show()
-                                    }
+                                descriptionTranslation.translate(
+                                    viewLifecycleOwner.lifecycleScope,
+                                    originalDescription,
+                                    getCurrentLocale(root.context),
+                                    ::renderDescriptionTranslation
+                                )
+                            }
+                        }
+
+                        var isExpanded = false
+                        resultDescription.setOnClickListener {
+                            if (isLayout(EMULATOR)) {
+                                isExpanded = !isExpanded
+                                resultDescription.maxLines = if (isExpanded) Integer.MAX_VALUE else 10
+                            } else {
+                                context?.let { ctx ->
+                                    AlertDialog.Builder(ctx, R.style.AlertDialogCustom)
+                                        .setMessage(resultDescription.text.toString().html())
+                                        .setTitle(d.plotHeaderText.asString(ctx))
+                                        .show()
                                 }
                             }
                         }

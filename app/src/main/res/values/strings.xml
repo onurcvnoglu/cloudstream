@@ -42,6 +42,11 @@
     <string name="episode_more_options_des">More Options</string>
     <string name="next_episode">Next episode</string>
     <string name="result_tags">Genres</string>
+    <string name="translate_description">Translate</string>
+    <string name="translating_description">Translating…</string>
+    <string name="translation_complete">Translated</string>
+    <string name="translation_unavailable">Translation is unavailable for this description</string>
+    <string name="translation_failed">Couldn’t translate the description</string>
     <string name="result_share">Share</string>
     <string name="result_open_in_browser">Open In Browser</string>
     <string name="browser">Browser</string>

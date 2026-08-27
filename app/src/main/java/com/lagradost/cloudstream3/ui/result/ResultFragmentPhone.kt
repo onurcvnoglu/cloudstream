@@ -24,6 +24,7 @@ import androidx.core.view.isVisible
 import androidx.core.widget.NestedScrollView
 import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import com.discord.panels.OverlappingPanelsLayout
 import com.discord.panels.PanelState
@@ -72,8 +73,10 @@ import com.lagradost.cloudstream3.ui.search.SearchAdapter
 import com.lagradost.cloudstream3.ui.search.SearchHelper
 import com.lagradost.cloudstream3.ui.setRecycledViewPool
 import com.lagradost.cloudstream3.ui.settings.SettingsGeneral.Companion.pickDownloadPath
+import com.lagradost.cloudstream3.ui.settings.getCurrentLocale
 import com.lagradost.cloudstream3.ui.settings.utils.getChooseFolderLauncher
 import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
+import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.AppContextUtils.isCastApiAvailable
 import com.lagradost.cloudstream3.utils.AppContextUtils.loadCache
 import com.lagradost.cloudstream3.utils.AppContextUtils.openBrowser
@@ -342,6 +345,7 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
         updateUIEvent -= ::updateUI
         playerHostView?.release()
         playerBinding = null
+        descriptionTranslation.cancel()
         resultBinding?.resultScroll?.setOnClickListener(null)
         resultBinding = null
         syncBinding = null
@@ -365,6 +369,7 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
 
     var selectSeason: String? = null
     var selectEpisodeRange: String? = null
+    private val descriptionTranslation = DescriptionTranslationController()
 
     private fun setUrl(url: String?) {
         if (url == null) {
@@ -975,15 +980,57 @@ open class ResultFragmentPhone : BaseFragment<FragmentResultSwipeBinding>(
                         logoView = backgroundPosterWatermarkBadge
                     )
 
-                    var isExpanded = false
-                    resultDescription.apply {
-                        setTextHtml(d.plotText)
-                        setOnClickListener {
-                            isExpanded = !isExpanded
-                            maxLines = if (isExpanded) {
-                                Integer.MAX_VALUE
-                            } else 10
+                    val originalDescription = d.plotText.asString(root.context)
+                    fun renderDescriptionTranslation(state: DescriptionTranslationState) {
+                        when (state) {
+                            is DescriptionTranslationState.Original -> {
+                                resultDescription.text = state.text.html()
+                                resultDescriptionTranslation.setText(R.string.translate_description)
+                            }
+
+                            DescriptionTranslationState.Translating -> {
+                                resultDescriptionTranslation.isEnabled = false
+                                resultDescriptionTranslation.setText(R.string.translating_description)
+                            }
+
+                            is DescriptionTranslationState.Translated -> {
+                                resultDescription.text = state.text.html()
+                                resultDescriptionTranslation.isEnabled = true
+                                resultDescriptionTranslation.setText(R.string.translation_complete)
+                            }
+
+                            DescriptionTranslationState.Unavailable -> {
+                                resultDescription.text = originalDescription.html()
+                                resultDescriptionTranslation.isEnabled = true
+                                resultDescriptionTranslation.setText(R.string.translate_description)
+                                showToast(R.string.translation_unavailable)
+                            }
+
+                            DescriptionTranslationState.Failed -> {
+                                resultDescription.text = originalDescription.html()
+                                resultDescriptionTranslation.isEnabled = true
+                                resultDescriptionTranslation.setText(R.string.translate_description)
+                                showToast(R.string.translation_failed)
+                            }
                         }
+                    }
+                    descriptionTranslation.reset(originalDescription, ::renderDescriptionTranslation)
+                    resultDescriptionTranslation.apply {
+                        isVisible = originalDescription.isNotBlank()
+                        setOnClickListener {
+                            descriptionTranslation.translate(
+                                viewLifecycleOwner.lifecycleScope,
+                                originalDescription,
+                                getCurrentLocale(root.context),
+                                ::renderDescriptionTranslation
+                            )
+                        }
+                    }
+
+                    var isExpanded = false
+                    resultDescription.setOnClickListener {
+                        isExpanded = !isExpanded
+                        resultDescription.maxLines = if (isExpanded) Integer.MAX_VALUE else 10
                     }
 
                     populateChips(resultTag, d.tags)

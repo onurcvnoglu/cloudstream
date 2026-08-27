@@ -37,6 +37,8 @@ ksoup = "0.2.6"
 ktor = "3.5.0"
 lifecycleKtx = "2.10.0"
 material = "1.14.0"
+mlkitLanguageId = "17.0.6"
+mlkitTranslate = "17.0.3"
 media3 = "1.9.3"
 navigationKtx = "2.9.8"
 newpipeextractor = "v0.26.3"
@@ -62,8 +64,8 @@ minSdk = "23"
 compileSdk = "37"
 targetSdk = "36"
 
-versionCode = "72"
-versionName = "6.0.4"
+versionCode = "73"
+versionName = "6.0.5"
 
 [libraries]
 activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "activityKtx" }
@@ -106,6 +108,8 @@ ktor-http = { module = "io.ktor:ktor-http", version.ref = "ktor" }
 lifecycle-livedata-ktx = { module = "androidx.lifecycle:lifecycle-livedata-ktx", version.ref = "lifecycleKtx" }
 lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycleKtx" }
 material = { module = "com.google.android.material:material", version.ref = "material" }
+mlkit-language-id = { module = "com.google.mlkit:language-id", version.ref = "mlkitLanguageId" }
+mlkit-translate = { module = "com.google.mlkit:translate", version.ref = "mlkitTranslate" }
 media3-cast = { module = "androidx.media3:media3-cast", version.ref = "media3" }
 media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
 media3-container  = { module = "androidx.media3:media3-container", version.ref = "media3" }

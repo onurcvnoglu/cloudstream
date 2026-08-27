@@ -441,6 +441,16 @@
                                     android:visibility="gone"
                                     tools:ignore="ContentDescription" />
                             </FrameLayout>
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/result_description_translation"
+                                style="@style/SmallBlackButton"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:contentDescription="@string/translate_description"
+                                android:text="@string/translate_description"
+                                android:visibility="gone" />
                         </LinearLayout>
                     </LinearLayout>
 

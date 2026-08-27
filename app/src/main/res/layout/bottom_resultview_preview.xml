@@ -159,7 +159,7 @@
                 android:layout_width="50dp"
                 android:layout_weight="1"
 
-                android:nextFocusRight="@id/resultview_preview_more_info"
+                android:nextFocusRight="@id/resultview_preview_translation"
 
                 android:nextFocusUp="@id/resultview_preview_favorite"
                 app:icon="@drawable/ic_baseline_bookmark_24"
@@ -168,12 +168,23 @@
                 tools:visibility="visible" />
 
             <com.google.android.material.button.MaterialButton
+                android:id="@+id/resultview_preview_translation"
+                style="@style/BlackButton"
+                android:layout_width="50dp"
+                android:layout_weight="1"
+                android:contentDescription="@string/translate_description"
+                android:nextFocusLeft="@id/resultview_preview_bookmark"
+                android:nextFocusRight="@id/resultview_preview_more_info"
+                android:text="@string/translate_description"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/resultview_preview_more_info"
                 style="@style/WhiteButton"
                 android:layout_width="50dp"
                 android:layout_weight="1"
 
-                android:nextFocusLeft="@id/resultview_preview_bookmark"
+                android:nextFocusLeft="@id/resultview_preview_translation"
 
                 android:nextFocusUp="@id/resultview_preview_favorite"
                 android:text="@string/home_more_info"

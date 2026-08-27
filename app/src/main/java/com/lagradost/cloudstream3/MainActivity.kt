@@ -39,6 +39,7 @@ import androidx.core.view.isVisible
 import androidx.core.view.marginStart
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.NavController
 import androidx.navigation.NavDestination
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -110,6 +111,8 @@ import com.lagradost.cloudstream3.ui.library.LibraryViewModel
 import com.lagradost.cloudstream3.ui.player.BasicLink
 import com.lagradost.cloudstream3.ui.player.GeneratorPlayer
 import com.lagradost.cloudstream3.ui.player.LinkGenerator
+import com.lagradost.cloudstream3.ui.result.DescriptionTranslationController
+import com.lagradost.cloudstream3.ui.result.DescriptionTranslationState
 import com.lagradost.cloudstream3.ui.result.LinearListLayout
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.result.START_ACTION_RESUME_LATEST
@@ -122,6 +125,7 @@ import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLandscape
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.Globals.updateTv
+import com.lagradost.cloudstream3.ui.settings.getCurrentLocale
 import com.lagradost.cloudstream3.ui.settings.SettingsGeneral
 import com.lagradost.cloudstream3.ui.setup.HAS_DONE_SETUP_KEY
 import com.lagradost.cloudstream3.ui.setup.SetupFragmentExtensions
@@ -443,6 +447,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
     var lastPopup: SearchResponse? = null
     var lastPopupJob: Job? = null
+    private val previewDescriptionTranslation = DescriptionTranslationController()
     fun loadPopup(result: SearchResponse, load: Boolean = true) {
         lastPopup = result
         val syncName = syncViewModel.syncName(result.apiName)
@@ -858,6 +863,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
     }
 
     private fun hidePreviewPopupDialog() {
+        previewDescriptionTranslation.cancel()
         bottomPreviewPopup.dismissSafe(this)
         lastPopupJob?.cancel()
         lastPopupJob = null
@@ -891,6 +897,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             bottomPreviewBinding = binding
             builder.setContentView(root)
             builder.setOnDismissListener {
+                previewDescriptionTranslation.cancel()
                 bottomPreviewPopup = null
                 bottomPreviewBinding = null
                 viewModel.clear()
@@ -1504,6 +1511,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
                 is Resource.Success -> {
                     val d = resource.value
+                    previewDescriptionTranslation.cancel()
                     showPreviewPopupDialog().apply {
                         resultviewPreviewLoading.isVisible = false
                         resultviewPreviewResult.isVisible = true
@@ -1516,7 +1524,56 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                         resultviewPreviewMetaDuration.setText(d.durationText)
                         resultviewPreviewMetaRating.setText(d.ratingText)
 
-                        resultviewPreviewDescription.setTextHtml(d.plotText)
+                        val originalDescription = d.plotText.asString(root.context)
+                        fun renderDescriptionTranslation(state: DescriptionTranslationState) {
+                            when (state) {
+                                is DescriptionTranslationState.Original -> {
+                                    resultviewPreviewDescription.text = state.text.html()
+                                    resultviewPreviewTranslation.setText(R.string.translate_description)
+                                }
+
+                                DescriptionTranslationState.Translating -> {
+                                    resultviewPreviewTranslation.isEnabled = false
+                                    resultviewPreviewTranslation.setText(R.string.translating_description)
+                                }
+
+                                is DescriptionTranslationState.Translated -> {
+                                    resultviewPreviewDescription.text = state.text.html()
+                                    resultviewPreviewTranslation.isEnabled = true
+                                    resultviewPreviewTranslation.setText(R.string.translation_complete)
+                                }
+
+                                DescriptionTranslationState.Unavailable -> {
+                                    resultviewPreviewDescription.text = originalDescription.html()
+                                    resultviewPreviewTranslation.isEnabled = true
+                                    resultviewPreviewTranslation.setText(R.string.translate_description)
+                                    showToast(R.string.translation_unavailable)
+                                }
+
+                                DescriptionTranslationState.Failed -> {
+                                    resultviewPreviewDescription.text = originalDescription.html()
+                                    resultviewPreviewTranslation.isEnabled = true
+                                    resultviewPreviewTranslation.setText(R.string.translate_description)
+                                    showToast(R.string.translation_failed)
+                                }
+                            }
+                        }
+                        previewDescriptionTranslation.reset(
+                            originalDescription,
+                            ::renderDescriptionTranslation
+                        )
+                        resultviewPreviewTranslation.apply {
+                            isVisible = originalDescription.isNotBlank()
+                            setOnClickListener {
+                                previewDescriptionTranslation.translate(
+                                    lifecycleScope,
+                                    originalDescription,
+                                    getCurrentLocale(root.context),
+                                    ::renderDescriptionTranslation
+                                )
+                            }
+                        }
+
                         if (isLayout(PHONE)) {
                             resultviewPreviewPoster.loadImage(
                                 d.posterImage ?: d.posterBackgroundImage,
@@ -1600,7 +1657,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                                 view.context?.let { ctx ->
                                     val builder: AlertDialog.Builder =
                                         AlertDialog.Builder(ctx, R.style.AlertDialogCustom)
-                                    builder.setMessage(d.plotText.asString(ctx).html())
+                                    builder.setMessage(resultviewPreviewDescription.text.toString().html())
                                         .setTitle(d.plotHeaderText.asString(ctx))
                                         .show()
                                 }

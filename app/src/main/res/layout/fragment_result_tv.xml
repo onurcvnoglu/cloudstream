@@ -442,6 +442,32 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
                 </LinearLayout>
 
                 <LinearLayout
+                    android:id="@+id/result_description_translation_holder"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/result_description_translation"
+                        style="@style/ResultSmallButtonTV"
+                        android:contentDescription="@string/translate_description"
+                        android:focusable="true"
+                        android:nextFocusDown="@id/result_description"
+                        android:nextFocusUp="@id/result_description_translation"
+                        android:tag="@string/tv_no_focus_tag"
+                        app:icon="@drawable/ic_baseline_language_24"
+                        app:iconPadding="0dp" />
+
+                    <TextView
+                        android:id="@+id/result_description_translation_text"
+                        style="@style/ResultMarqueeButtonText"
+                        android:text="@string/translate_description" />
+
+                </LinearLayout>
+
+                <LinearLayout
                     android:id="@+id/result_favorite"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -622,6 +648,7 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
                         android:textColor="?attr/textColor"
                         android:textSize="16sp"
                         tools:text="Ryan Quicksave Romano is an eccentric adventurer with a strange power: he can create a save-point in time and redo his life whenever he dies. Arriving in New Rome, the glitzy capital of sin of a rebuilding Europe, he finds the city torn between mega-corporations, sponsored heroes, superpowered criminals, and true monsters. It's a time of chaos, where potions can grant the power to rule the world and dangers lurk everywhere. " />
+
 
                     <com.google.android.material.chip.ChipGroup
                         android:id="@+id/result_tag"

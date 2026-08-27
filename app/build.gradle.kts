@@ -237,6 +237,8 @@ dependencies {
     // Design & UI
     implementation(libs.preference.ktx)
     implementation(libs.material)
+    implementation(libs.mlkit.language.id)
+    implementation(libs.mlkit.translate)
     implementation(libs.constraintlayout)
 
     // Coil Image Loading
