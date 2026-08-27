@@ -204,6 +204,22 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
         const val TAG = "MAINACT"
         const val ANIMATED_OUTLINE: Boolean = false
+        private val focusRect = Rect()
+        private val focusCenteringExceptions = setOf(
+            R.id.home_preview_info_btt,
+            R.id.home_preview_hidden_next_focus,
+            R.id.home_preview_hidden_prev_focus,
+            R.id.result_play_movie_button,
+            R.id.result_play_series_button,
+            R.id.result_resume_series_button,
+            R.id.result_play_trailer_button,
+            R.id.result_bookmark_Button,
+            R.id.result_description_translation,
+            R.id.result_favorite_Button,
+            R.id.result_subscribe_Button,
+            R.id.result_search_Button,
+            R.id.result_episodes_show_button,
+        )
         var lastError: String? = null
 
         /** Update lastError variable based on error file, to check if app crashed.
@@ -430,14 +446,13 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
             if (view == null) return
             try {
                 Log.v(TAG, "centerView: $view")
-                val r = Rect(0, 0, 0, 0)
-                view.getDrawingRect(r)
-                val x = r.centerX()
-                val y = r.centerY()
-                val dx = r.width() / 2 //screenWidth / 2
+                view.getDrawingRect(focusRect)
+                val x = focusRect.centerX()
+                val y = focusRect.centerY()
+                val dx = focusRect.width() / 2 //screenWidth / 2
                 val dy = screenHeight / 2
-                val r2 = Rect(x - dx, y - dy, x + dx, y + dy)
-                view.requestRectangleOnScreen(r2, false)
+                focusRect.set(x - dx, y - dy, x + dx, y + dy)
+                view.requestRectangleOnScreen(focusRect, false)
                 // TvFocus.current =TvFocus.current.copy(y=y.toFloat())
             } catch (_: Throwable) {
             }
@@ -938,18 +953,21 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
         var focusOutline: WeakReference<View> = WeakReference(null)
         var lastFocus: WeakReference<View> = WeakReference(null)
+        private val delayedFocusUpdate = Runnable {
+            updateFocusView(lastFocus.get(), same = true)
+        }
+        private val delayedLayoutUpdate = Runnable {
+            updateFocusView(lastFocus.get(), same = false)
+        }
         private val layoutListener: View.OnLayoutChangeListener =
             View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 // shitty fix for layouts
-                lastFocus.get()?.apply {
-                    updateFocusView(
-                        this, same = true
-                    )
-                    postDelayed({
-                        updateFocusView(
-                            lastFocus.get(), same = false
-                        )
-                    }, 300)
+                lastFocus.get()?.let { focusedView ->
+                    updateFocusView(focusedView, same = true)
+                    focusOutline.get()?.apply {
+                        removeCallbacks(delayedLayoutUpdate)
+                        postDelayed(delayedLayoutUpdate, 300)
+                    }
                 }
             }
         private val attachListener: View.OnAttachStateChangeListener =
@@ -985,6 +1003,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         }
 
         private var animator: ValueAnimator? = null
+        private val snapHelper = LinearSnapHelper()
 
         /** if this is enabled it will keep the focus unmoving
          *  during listview move */
@@ -1031,9 +1050,8 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                 if (parent is RecyclerView) {
                     val layoutManager = parent.layoutManager
                     if (layoutManager is LinearListLayout && layoutManager.orientation == LinearLayoutManager.HORIZONTAL) {
-                        val dx =
-                            LinearSnapHelper().calculateDistanceToFinalSnap(layoutManager, newFocus)
-                                ?.get(0)
+                        val dx = snapHelper.calculateDistanceToFinalSnap(layoutManager, newFocus)
+                            ?.get(0)
 
                         if (dx != null) {
                             val rdx = if (LEFTMOST_MOVE_LIST) {
@@ -1050,7 +1068,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                             }
 
                             if (!NO_MOVE_LIST) {
-                                parent.smoothScrollBy(rdx, 0)
+                                if (rdx != 0) parent.smoothScrollBy(rdx, 0)
                             } else {
                                 val smoothScroll = reflectedScroll
                                 if (smoothScroll == null) {
@@ -1156,9 +1174,8 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
                 // post check
                 if (!same) {
-                    newFocus.postDelayed({
-                        updateFocusView(lastFocus.get(), same = true)
-                    }, 200)
+                    focusOutline.removeCallbacks(delayedFocusUpdate)
+                    focusOutline.postDelayed(delayedFocusUpdate, 200)
                 }
 
                 /*
@@ -1256,25 +1273,10 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                 }
 
                 if (isLayout(TV)) {
-                    // Put here any button you don't want focusing it to center the view
-                    val exceptionButtons = listOf(
-                        //R.id.home_preview_play_btt,
-                        R.id.home_preview_info_btt,
-                        R.id.home_preview_hidden_next_focus,
-                        R.id.home_preview_hidden_prev_focus,
-                        R.id.result_play_movie_button,
-                        R.id.result_play_series_button,
-                        R.id.result_resume_series_button,
-                        R.id.result_play_trailer_button,
-                        R.id.result_bookmark_Button,
-                        R.id.result_favorite_Button,
-                        R.id.result_subscribe_Button,
-                        R.id.result_search_Button,
-                        R.id.result_episodes_show_button,
-                    )
-
                     newLocalBinding.root.viewTreeObserver.addOnGlobalFocusChangeListener { _, newFocus ->
-                        if (exceptionButtons.contains(newFocus?.id)) return@addOnGlobalFocusChangeListener
+                        if (focusCenteringExceptions.contains(newFocus?.id)) {
+                            return@addOnGlobalFocusChangeListener
+                        }
                         centerView(newFocus)
                     }
                 }

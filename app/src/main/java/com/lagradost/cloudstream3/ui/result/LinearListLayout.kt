@@ -2,6 +2,7 @@ package com.lagradost.cloudstream3.ui.result
 
 import android.content.Context
 import android.view.View
+import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.lagradost.cloudstream3.CommonActivity
@@ -44,6 +45,8 @@ open class LinearListLayout(context: Context?) :
     var nextFocusUp: Int = View.NO_ID
     var nextFocusDown: Int = View.NO_ID
 
+    private var pendingFocusPosition = RecyclerView.NO_POSITION
+
     fun setHorizontal() {
         orientation = HORIZONTAL
     }
@@ -53,28 +56,35 @@ open class LinearListLayout(context: Context?) :
     }
 
     private fun getCorrectParent(focused: View?): View? {
-        if (focused == null) return null
-        var current: View? = focused
-        val last: ArrayList<View> = arrayListOf(focused)
-        while (current != null && current !is RecyclerView) {
-            current = (current.parent as? View?)?.also { last.add(it) }
+        var current = focused ?: return null
+        while (current.parent is View && current.parent !is RecyclerView) {
+            current = current.parent as View
         }
-        return last.getOrNull(last.count() - 2)
+        return current.takeIf { it.parent is RecyclerView }
     }
 
     private fun getPosition(view: View?): Int? {
         return (view?.layoutParams as? RecyclerView.LayoutParams?)?.absoluteAdapterPosition
     }
 
-    private fun getViewFromPos(pos: Int): View? {
-        for (i in 0 until childCount) {
-            val child = getChildAt(i)
-            if ((child?.layoutParams as? RecyclerView.LayoutParams?)?.absoluteAdapterPosition == pos) {
-                return child
+    private fun getViewFromPos(pos: Int): View? = findViewByPosition(pos)
+
+    private fun focusAfterLayout(
+        recyclerView: RecyclerView,
+        focused: View,
+        position: Int,
+    ): View {
+        if (pendingFocusPosition != position) {
+            pendingFocusPosition = position
+            recyclerView.doOnNextLayout {
+                if (pendingFocusPosition != position) return@doOnNextLayout
+                pendingFocusPosition = RecyclerView.NO_POSITION
+                if (!focused.hasFocus()) return@doOnNextLayout
+                findViewByPosition(position)?.takeIf { it.isFocusable }?.requestFocus()
             }
         }
-        return null
-        //return recyclerView.children.firstOrNull { child -> (child.layoutParams as? RecyclerView.LayoutParams?)?.absoluteAdapterPosition == pos) }
+        scrollToPosition(position)
+        return focused
     }
 
     /*
@@ -188,9 +198,12 @@ open class LinearListLayout(context: Context?) :
                     if (orientation == HORIZONTAL) FocusDirection.Start else FocusDirection.Up
                 )
             } else {
-                getViewFromPos(lookFor) ?: run {
-                    scrollToPosition(lookFor)
-                    null
+                getViewFromPos(lookFor)?.also {
+                    pendingFocusPosition = RecyclerView.NO_POSITION
+                } ?: run {
+                    val recyclerView = getCorrectParent(focused)?.parent as? RecyclerView
+                        ?: return null
+                    focusAfterLayout(recyclerView, focused, lookFor)
                 }
             }
         } catch (e: Exception) {
