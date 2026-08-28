@@ -34,6 +34,7 @@ import androidx.core.text.toSpanned
 import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Format.NO_VALUE
 import androidx.media3.common.MimeTypes
@@ -101,6 +102,7 @@ import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.subtitles.SUBTITLE_AUTO_SELECT_KEY
 import com.lagradost.cloudstream3.ui.subtitles.SubtitlesFragment
 import com.lagradost.cloudstream3.ui.subtitles.SubtitlesFragment.Companion.getAutoSelectLanguageTagIETF
+import com.lagradost.cloudstream3.utils.AppContextUtils.filterProviderByPreferredMedia
 import com.lagradost.cloudstream3.utils.AppContextUtils.getShortSeasonText
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.AppContextUtils.sortSubs
@@ -146,6 +148,7 @@ class GeneratorPlayer : FullScreenPlayer() {
         const val NOTIFICATION_ID = 2326
         const val CHANNEL_ID = 7340
         const val STOP_ACTION = "stopcs3"
+        private const val MAX_SUBTITLE_TRANSLATION_CANDIDATES = 3
 
         private val generators = ConcurrentHashMap<String, VideoGenerator<*>>()
         fun newInstance(
@@ -174,6 +177,7 @@ class GeneratorPlayer : FullScreenPlayer() {
     private var showName = false
     private var showResolution = false
     private var showMediaInfo = false
+    private var autoTranslateSubtitles = false
 
     private lateinit var viewModel: PlayerGeneratorViewModel //by activityViewModels()
     private lateinit var sync: SyncViewModel
@@ -189,6 +193,9 @@ class GeneratorPlayer : FullScreenPlayer() {
     private var preferredAutoSelectSubtitles: String? = null // null means do nothing, "" means none
     private var preferredSource: String? = null
     private var preferredSubtitle: SubtitlePreference? = null
+    private val subtitleTranslationController = SubtitleTranslationController()
+    private var subtitleTranslationJob: Job? = null
+    private var failedSubtitleTranslationAttempt: String? = null
     private val allMeta: List<ResultEpisode>?
         get() = viewModel.state.generatorState?.allMeta?.filterIsInstance<ResultEpisode>()
             ?.map { episode ->
@@ -211,6 +218,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                 Log.i(TAG, "Set SUBTITLE_AUTO_SELECT_KEY to '$subtitleLanguageTagIETF'")
                 setKey(SUBTITLE_AUTO_SELECT_KEY, subtitleLanguageTagIETF)
                 preferredAutoSelectSubtitles = subtitleLanguageTagIETF
+                viewModel.updateSubtitleFallbackLanguage(subtitleLanguageTagIETF)
             }
             preferredSubtitle = subtitle?.toSubtitlePreference() ?: noSubtitlePreference()
         }
@@ -1659,8 +1667,11 @@ class GeneratorPlayer : FullScreenPlayer() {
         val waitingForSubtitleSource = preferred == null &&
                 autoSubtitleLanguage != null &&
                 !hasSourceLinkedSubtitle(links, subtitles, autoSubtitleLanguage)
+        val waitingForSubtitleTranslation = autoTranslateSubtitles &&
+                autoSubtitleLanguage != null &&
+                subtitles.none { it.matchesLanguageCode(autoSubtitleLanguage) }
         if (viewModel.state.loading is Resource.Loading &&
-            (waitingForPreferredSource || waitingForSubtitleSource)
+            (waitingForPreferredSource || waitingForSubtitleSource || waitingForSubtitleTranslation)
         ) {
             return
         }
@@ -1670,6 +1681,13 @@ class GeneratorPlayer : FullScreenPlayer() {
             noLinksFound()
             return
         }
+        if (startSubtitleTranslationIfNeeded(
+                firstAvailableLink,
+                subtitles,
+                autoSubtitleLanguage,
+            )
+        ) return
+
         // Atomic operation to prevent double loading
         if (!isPlayerActive.compareAndSet(false, true)) {
             return
@@ -1771,6 +1789,7 @@ class GeneratorPlayer : FullScreenPlayer() {
     override fun onDestroy() {
         ResultFragment.updateUI()
         currentVerifyLink?.cancel()
+        clearSubtitleTranslation()
         super.onDestroy()
     }
 
@@ -1953,6 +1972,131 @@ class GeneratorPlayer : FullScreenPlayer() {
                 autoSelectFromDownloads()
             }
         }
+    }
+
+    private fun getSubtitleTranslationCandidates(
+        subtitles: Set<SubtitleData>,
+        link: VideoLink,
+        targetLanguageTag: String,
+    ): List<SubtitleData> {
+        val activeSource = link.first?.sourceId()
+        val orderedCandidates = sortSubs(subtitles)
+            .asSequence()
+            .filter { subtitle ->
+                subtitle.origin != SubtitleOrigin.EMBEDDED_IN_VIDEO &&
+                        !subtitle.matchesLanguageCode(targetLanguageTag)
+            }
+            .sortedWith(
+                compareBy<SubtitleData>(
+                    { subtitle ->
+                        when {
+                            activeSource != null && subtitle.source == activeSource -> 0
+                            subtitle.source.isNullOrBlank() -> 1
+                            else -> 2
+                        }
+                    },
+                    { subtitle -> if (subtitle.getIETF_tag() == "en") 0 else 1 },
+                    { subtitle -> if (subtitle.origin == SubtitleOrigin.URL) 0 else 1 },
+                )
+            )
+            .distinctBy { subtitle ->
+                Triple(subtitle.origin, subtitle.getFixedUrl(), subtitle.headers)
+            }
+            .toList()
+
+        // Önce farklı dilleri örnekleyerek boş etiketlenmiş İngilizce dosyasının aynı dildeki
+        // kopyalar yüzünden ikinci ve üçüncü gerçek dil adaylarını dışarıda bırakmasını önlüyoruz.
+        val candidates = orderedCandidates
+            .distinctBy { subtitle ->
+                subtitle.getIETF_tag() ?: subtitle.languageCode ?: subtitle.originalName
+            }
+            .take(MAX_SUBTITLE_TRANSLATION_CANDIDATES)
+            .toMutableList()
+        if (candidates.size < MAX_SUBTITLE_TRANSLATION_CANDIDATES) {
+            candidates += orderedCandidates
+                .filterNot(candidates::contains)
+                .take(MAX_SUBTITLE_TRANSLATION_CANDIDATES - candidates.size)
+        }
+        return candidates
+    }
+
+    /**
+     * Hedef dil yoksa oynatmayı başlatmadan önce en fazla üç kaynağın içeriğini karşılaştırır.
+     * Aynı başarısız denemeyi tekrarlamayarak model veya ağ hatasında oynatmanın kilitlenmesini önler.
+     */
+    private fun startSubtitleTranslationIfNeeded(
+        link: VideoLink,
+        subtitles: Set<SubtitleData>,
+        targetLanguageTag: String?,
+    ): Boolean {
+        if (!autoTranslateSubtitles) return false
+        val targetLanguage = targetLanguageTag?.takeIf(String::isNotBlank) ?: return false
+        if (preferredSubtitle?.isNone == true || subtitles.any {
+                it.matchesLanguageCode(targetLanguage)
+            }
+        ) return false
+
+        val candidates = getSubtitleTranslationCandidates(subtitles, link, targetLanguage)
+        if (candidates.isEmpty()) return false
+        val instance = viewModel.state.instance
+        val candidateIds = candidates.joinToString(",") { candidate -> candidate.getId() }
+        val attempt = "$instance|${link.first?.sourceId().orEmpty()}|$candidateIds|$targetLanguage"
+        if (failedSubtitleTranslationAttempt == attempt) return false
+        if (subtitleTranslationJob?.isActive == true) return true
+
+        val ctx = context ?: return false
+        binding?.playerLoadingOverlay?.isVisible = true
+        binding?.overlayLoadingSkipButton?.isVisible = false
+        binding?.subtitleTranslationProgress?.apply {
+            text = ctx.getString(R.string.subtitle_translation_progress, 0)
+            isVisible = true
+        }
+
+        subtitleTranslationJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = subtitleTranslationController.translate(
+                context = ctx,
+                sources = candidates,
+                targetLanguageTag = targetLanguage,
+            ) { progress ->
+                binding?.subtitleTranslationProgress?.text =
+                    ctx.getString(R.string.subtitle_translation_progress, progress)
+            }
+
+            if (!isActive || instance != viewModel.state.instance) return@launch
+            when (result) {
+                is SubtitleTranslationResult.Translated -> {
+                    viewModel.addSubtitles(setOf(result.subtitle))
+                }
+
+                SubtitleTranslationResult.Unavailable -> {
+                    failedSubtitleTranslationAttempt = attempt
+                    showToast(R.string.subtitle_translation_unavailable, Toast.LENGTH_LONG)
+                }
+
+                is SubtitleTranslationResult.Failed -> {
+                    failedSubtitleTranslationAttempt = attempt
+                    logError(result.error)
+                    showToast(R.string.subtitle_translation_failed, Toast.LENGTH_LONG)
+                }
+            }
+
+            binding?.subtitleTranslationProgress?.isVisible = false
+            subtitleTranslationJob = null
+            startPlayer()
+        }
+        return true
+    }
+
+    private fun cancelSubtitleTranslation() {
+        subtitleTranslationJob?.cancel()
+        subtitleTranslationJob = null
+        binding?.subtitleTranslationProgress?.isVisible = false
+    }
+
+    private fun clearSubtitleTranslation() {
+        cancelSubtitleTranslation()
+        failedSubtitleTranslationAttempt = null
+        subtitleTranslationController.clear()
     }
 
     private fun getHeaderName(): String? {
@@ -2300,6 +2444,9 @@ class GeneratorPlayer : FullScreenPlayer() {
 
     @MainThread
     fun releasePlayer() {
+        // Normal oynatıcı yenilemesi çevrilmiş dosyayı yeniden okuyacağı için dosya fragment
+        // kapanana kadar korunur; burada yalnızca devam eden işi iptal ediyoruz.
+        cancelSubtitleTranslation()
         player.release()
         // Explicit source/subtitle preferences live separately and survive this player reset.
         currentSelectedSubtitles = null
@@ -2349,6 +2496,10 @@ class GeneratorPlayer : FullScreenPlayer() {
                 settingsManager.getBoolean(ctx.getString(R.string.show_resolution_key), true)
             showMediaInfo =
                 settingsManager.getBoolean(ctx.getString(R.string.show_media_info_key), false)
+            autoTranslateSubtitles = settingsManager.getBoolean(
+                ctx.getString(R.string.auto_translate_subtitles_key),
+                false,
+            )
             limitTitle = settingsManager.getInt(ctx.getString(R.string.prefer_title_limit_key), 0)
             updateForcedEncoding(ctx)
             viewModel.filterSubByLang =
@@ -2377,6 +2528,10 @@ class GeneratorPlayer : FullScreenPlayer() {
         sync.updateUserData()
 
         preferredAutoSelectSubtitles = getAutoSelectLanguageTagIETF()
+        viewModel.configureSubtitleFallback(
+            preferredAutoSelectSubtitles,
+            context?.filterProviderByPreferredMedia(hasHomePageIsRequired = false).orEmpty(),
+        )
 
         val selectedLink = currentSelectedLink
         if (selectedLink == null) {

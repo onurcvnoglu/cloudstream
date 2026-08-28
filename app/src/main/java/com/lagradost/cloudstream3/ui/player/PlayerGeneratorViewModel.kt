@@ -6,6 +6,7 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lagradost.cloudstream3.LoadResponse
+import com.lagradost.cloudstream3.MainAPI
 import com.lagradost.cloudstream3.mvvm.Resource
 import com.lagradost.cloudstream3.mvvm.launchSafe
 import com.lagradost.cloudstream3.mvvm.logError
@@ -25,6 +26,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentSetOf
 import kotlinx.collections.immutable.toPersistentList
 import kotlinx.collections.immutable.toPersistentSet
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -254,6 +256,23 @@ class PlayerGeneratorViewModel : ViewModel() {
 
     var forceClearCache = false
 
+    @Volatile
+    private var subtitleFallbackLanguage: String? = null
+
+    @Volatile
+    private var subtitleFallbackProviders: List<MainAPI> = emptyList()
+
+    private val crossProviderSubtitleFetcher = CrossProviderSubtitleFetcher()
+
+    fun configureSubtitleFallback(languageTag: String?, providers: List<MainAPI>) {
+        updateSubtitleFallbackLanguage(languageTag)
+        subtitleFallbackProviders = providers.toList()
+    }
+
+    fun updateSubtitleFallbackLanguage(languageTag: String?) {
+        subtitleFallbackLanguage = languageTag?.takeIf(String::isNotBlank)
+    }
+
     fun setSubtitleYear(year: Int?) {
         _currentSubtitleYear.postValue(year)
     }
@@ -407,8 +426,14 @@ class PlayerGeneratorViewModel : ViewModel() {
                 instance = instance + 1
             )
         }
+        val loadInstance = state.instance
 
         currentJob = viewModelScope.launchSafe {
+            // Alternatif provider araması ana link yüklemesini veya player başlangıcını bekletmez.
+            launch {
+                loadCrossProviderSubtitles(loadInstance)
+            }
+
             // Load more data
             val loadingState = safeApiCall {
                 generator?.generateLinks(
@@ -446,6 +471,41 @@ class PlayerGeneratorViewModel : ViewModel() {
                     }
                 }
             }
+        }
+    }
+
+    private suspend fun loadCrossProviderSubtitles(loadInstance: Int) {
+        val languageTag = subtitleFallbackLanguage ?: return
+        val currentState = state
+        if (currentState.instance != loadInstance) return
+
+        val generatorState = currentState.generatorState ?: return
+        val page = generatorState.response ?: return
+        val episode = generatorState.meta as? ResultEpisode ?: return
+        val providers = subtitleFallbackProviders
+        if (providers.isEmpty()) return
+
+        // Alternatif altyazı araması ana provider yüklemesiyle paralel çalışır. Her provider sonucu
+        // gelir gelmez eklenir; video linkleri ve mevcut kaynak öncelikleri değişmeden kalır.
+        try {
+            crossProviderSubtitleFetcher.fetch(
+                page = page,
+                episode = episode,
+                languageTag = languageTag,
+                providers = providers,
+                subtitleCallback = { subtitles ->
+                    val validSubtitles = subtitles.filter(::isValidSubtitle)
+                    if (validSubtitles.isNotEmpty()) {
+                        modifyState {
+                            if (instance == loadInstance) add(validSubtitles) else this
+                        }
+                    }
+                },
+            )
+        } catch (exception: CancellationException) {
+            throw exception
+        } catch (throwable: Throwable) {
+            logError(throwable)
         }
     }
 }

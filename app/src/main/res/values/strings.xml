@@ -47,6 +47,12 @@
     <string name="translation_complete">Translated</string>
     <string name="translation_unavailable">Translation is unavailable for this description</string>
     <string name="translation_failed">Couldn’t translate the description</string>
+    <string name="subtitle_translation_progress">Translating subtitles with Google Translate: %1$d%%</string>
+    <string name="subtitle_translation_name_suffix">(Google Translate • from %1$s)</string>
+    <string name="subtitle_translation_failed">Couldn’t translate subtitles; playback will continue with the original tracks</string>
+    <string name="subtitle_translation_unavailable">Automatic subtitle translation is unavailable for these tracks</string>
+    <string name="auto_translate_subtitles">Auto-translate subtitles</string>
+    <string name="auto_translate_subtitles_summary">Translate a complete subtitle track into the auto-select language when no matching track is available</string>
     <string name="result_share">Share</string>
     <string name="result_open_in_browser">Open In Browser</string>
     <string name="browser">Browser</string>

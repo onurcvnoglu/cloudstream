@@ -36,7 +36,10 @@ import java.nio.charset.Charset
  * enough to identify the subtitle format.
  */
 @OptIn(UnstableApi::class)
-class CustomDecoder(private val fallbackFormat: Format?) : SubtitleParser {
+class CustomDecoder(
+    private val fallbackFormat: Format?,
+    private val parseEntireInput: Boolean = false,
+) : SubtitleParser {
     companion object {
         fun updateForcedEncoding(context: Context) {
             val settingsManager = PreferenceManager.getDefaultSharedPreferences(context)
@@ -337,10 +340,14 @@ class CustomDecoder(private val fallbackFormat: Format?) : SubtitleParser {
                     }
                 }
                 val array = str.toByteArray()
+                // Kodlama dönüşümü byte uzunluğunu değiştirebildiği için tam dosya çevirisinde
+                // kaynak uzunluğuyla kesmek yerine dönüştürülmüş içeriğin tamamını ayrıştırıyoruz.
+                val parserOffset = if (parseEntireInput) 0 else minOf(array.size, offset)
+                val parserLength = if (parseEntireInput) array.size else minOf(array.size, length)
                 realDecoder?.parse(
                     array,
-                    minOf(array.size, offset),
-                    minOf(array.size, length),
+                    parserOffset,
+                    parserLength,
                     outputOptions,
                     customOutput
                 )

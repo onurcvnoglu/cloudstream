@@ -13,6 +13,7 @@
     <string name="fast_forward_button_time_key">fast_forward_button_time</string>
     <string name="benene_count">benene_count</string>
     <string name="subtitle_settings_key">subtitle_settings_key</string>
+    <string name="auto_translate_subtitles_key">auto_translate_subtitles</string>
     <string name="test_providers_key">test_providers_key</string>
     <string name="subtitle_settings_chromecast_key">subtitle_settings_chromecast_key</string>
     <string name="quality_pref_key">quality_pref_key</string>

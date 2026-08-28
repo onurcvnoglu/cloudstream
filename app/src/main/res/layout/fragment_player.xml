@@ -64,6 +64,21 @@
             android:layout_height="50dp"
             android:layout_gravity="center" />
 
+        <TextView
+            android:id="@+id/subtitle_translation_progress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="32dp"
+            android:background="#B3000000"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:textColor="@android:color/white"
+            android:textStyle="bold"
+            android:visibility="gone"
+            tools:text="Translating subtitles with Google Translate: 42%"
+            tools:visibility="visible" />
+
         <FrameLayout
             android:id="@+id/video_go_back_holder_holder"
             android:layout_width="wrap_content"

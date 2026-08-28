@@ -34,6 +34,12 @@
     <string name="episode_more_options_des">Daha Fazla Seçenek</string>
     <string name="next_episode">Sonraki bölüm</string>
     <string name="result_tags">Türler</string>
+    <string name="subtitle_translation_progress">Altyazılar Google Translate ile çevriliyor: %1$d%%</string>
+    <string name="subtitle_translation_name_suffix">(Google Translate • %1$s dilinden)</string>
+    <string name="subtitle_translation_failed">Altyazılar çevrilemedi; oynatma mevcut altyazılarla devam edecek</string>
+    <string name="subtitle_translation_unavailable">Bu altyazılar için otomatik çeviri kullanılamıyor</string>
+    <string name="auto_translate_subtitles">Altyazıları otomatik çevir</string>
+    <string name="auto_translate_subtitles_summary">Otomatik seçilen dilde altyazı yoksa mevcut bir altyazının tamamını Google Translate ile çevirir</string>
     <string name="result_share">Paylaş</string>
     <string name="result_open_in_browser">Tarayıcıda aç</string>
     <string name="skip_loading">Yüklemeyi Atla</string>

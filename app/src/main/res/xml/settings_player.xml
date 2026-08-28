@@ -43,6 +43,12 @@
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/pref_category_subtitles">
+        <SwitchPreference
+            android:defaultValue="false"
+            android:icon="@drawable/ic_baseline_language_24"
+            android:key="@string/auto_translate_subtitles_key"
+            android:summary="@string/auto_translate_subtitles_summary"
+            android:title="@string/auto_translate_subtitles" />
         <Preference
             android:icon="@drawable/ic_outline_subtitles_24"
             android:key="@string/subtitle_settings_key"
