@@ -20,7 +20,8 @@ fun RecyclerView?.setLinearListLayout(
     nextLeft: Int = FOCUS_INHERIT,
     nextRight: Int = FOCUS_INHERIT,
     nextUp: Int = FOCUS_INHERIT,
-    nextDown: Int = FOCUS_INHERIT
+    nextDown: Int = FOCUS_INHERIT,
+    coalesceTvScroll: Boolean = false,
 ) {
     if (this == null) return
     val ctx = this.context ?: return
@@ -34,6 +35,7 @@ fun RecyclerView?.setLinearListLayout(
             if (nextUp == FOCUS_INHERIT) this@setLinearListLayout.nextFocusUpId else nextUp
         nextFocusDown =
             if (nextDown == FOCUS_INHERIT) this@setLinearListLayout.nextFocusDownId else nextDown
+        this.coalesceTvScroll = coalesceTvScroll
     }
 }
 
@@ -46,6 +48,10 @@ open class LinearListLayout(context: Context?) :
     var nextFocusDown: Int = View.NO_ID
 
     private var pendingFocusPosition = RecyclerView.NO_POSITION
+    var coalesceTvScroll: Boolean = false
+    private var pendingHorizontalScroll = 0
+    private var horizontalScrollPosted = false
+    private var horizontalScrollParent: RecyclerView? = null
 
     fun setHorizontal() {
         orientation = HORIZONTAL
@@ -226,7 +232,25 @@ open class LinearListLayout(context: Context?) :
             }
             return if (dx != 0) {
                 when {
-                    immediate -> parent.scrollBy(dx, 0)
+                    immediate -> {
+                        parent.stopScroll()
+                        parent.scrollBy(dx, 0)
+                    }
+                    coalesceTvScroll -> {
+                        pendingHorizontalScroll = dx
+                        horizontalScrollParent = parent
+                        parent.stopScroll()
+                        if (!horizontalScrollPosted) {
+                            horizontalScrollPosted = true
+                            parent.postOnAnimation {
+                                horizontalScrollPosted = false
+                                val scrollParent = horizontalScrollParent ?: return@postOnAnimation
+                                val pendingScroll = pendingHorizontalScroll
+                                pendingHorizontalScroll = 0
+                                if (pendingScroll != 0) scrollParent.smoothScrollBy(pendingScroll, 0)
+                            }
+                        }
+                    }
                     else -> parent.smoothScrollBy(dx, 0)
                 }
                 true

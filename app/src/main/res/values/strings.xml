@@ -97,6 +97,9 @@
     <string name="links_reloaded_toast">Links Reloaded</string>
     <string name="download_storage_text">Internal Storage</string>
     <string name="app_dubbed_text">Dub</string>
+    <string name="resume_watching_title_format" formatted="true">%1$s - (%2$s)</string>
+    <string name="tmdb_metadata_fallback">Use English TMDB metadata fallback</string>
+    <string name="tmdb_metadata_fallback_summary">Uses TMDB data when provider metadata is incomplete. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
     <string name="app_subbed_text">Sub</string>
     <string name="popup_delete_file">Delete File</string>
     <string name="popup_play_file">Play File</string>

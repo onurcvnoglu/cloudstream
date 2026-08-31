@@ -17,6 +17,13 @@
 
     <SwitchPreference
         android:icon="@drawable/ic_baseline_extension_24"
+        android:key="@string/tmdb_metadata_fallback_key"
+        android:title="@string/tmdb_metadata_fallback"
+        android:summary="@string/tmdb_metadata_fallback_summary"
+        app:defaultValue="false" />
+
+    <SwitchPreference
+        android:icon="@drawable/ic_baseline_extension_24"
         android:key="@string/enable_nsfw_on_providers_key"
         android:summary="@string/apply_on_restart"
         android:title="@string/enable_nsfw_on_providers"

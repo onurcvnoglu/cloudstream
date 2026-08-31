@@ -23,15 +23,10 @@ object HomeFocusRestorePlanner {
         target: HomeFocusRestoreTarget,
     ): HomeFocusRestoreSelection? {
         val targetCategoryIndex = categories.indexOfFirst { it.key == target.categoryKey }
-        val categoryIndex = if (
-            targetCategoryIndex >= 0 && categories[targetCategoryIndex].cardKeys.isNotEmpty()
-        ) {
-            targetCategoryIndex
-        } else {
-            categories.indexOfFirst { it.cardKeys.isNotEmpty() }
+        if (targetCategoryIndex < 0 || categories[targetCategoryIndex].cardKeys.isEmpty()) {
+            return null
         }
-
-        if (categoryIndex < 0) return null
+        val categoryIndex = targetCategoryIndex
 
         val category = categories[categoryIndex]
         val requestedCardIndex = if (categoryIndex == targetCategoryIndex) {

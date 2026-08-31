@@ -280,6 +280,11 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         val bookmarksUpdatedEvent = Event<Boolean>()
 
         /**
+         * Notifies screens that the in-place metadata preview was dismissed.
+         */
+        val previewPopupDismissedEvent = Event<Unit>()
+
+        /**
          * Used by DataStoreHelper to fully reload home when switching accounts
          */
         val reloadHomeEvent = Event<Boolean>()
@@ -886,6 +891,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         bottomPreviewBinding = null
     }
 
+    private var isOpeningFullResultFromPreview = false
     private var bottomPreviewPopup: Dialog? = null
     private var bottomPreviewBinding: BottomResultviewPreviewBinding? = null
     private fun showPreviewPopupDialog(): BottomResultviewPreviewBinding {
@@ -916,6 +922,10 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                 bottomPreviewPopup = null
                 bottomPreviewBinding = null
                 viewModel.clear()
+                if (!isOpeningFullResultFromPreview) {
+                    previewPopupDismissedEvent.invoke(Unit)
+                }
+                isOpeningFullResultFromPreview = false
             }
             builder.setCanceledOnTouchOutside(true)
             builder.show()
@@ -1666,6 +1676,7 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
                             }
 
                         resultviewPreviewMoreInfo.setOnClickListener {
+                            isOpeningFullResultFromPreview = true
                             viewModel.clear()
                             hidePreviewPopupDialog()
                             lastPopup?.let {

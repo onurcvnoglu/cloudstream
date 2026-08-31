@@ -47,6 +47,7 @@
     <string name="show_cast_in_details_key">show_cast_in_details_key</string>
     <string name="random_button_key">random_button_key</string>
     <string name="provider_lang_key">provider_lang_key</string>
+    <string name="tmdb_metadata_fallback_key">tmdb_metadata_fallback</string>
     <string name="dns_key">dns_key</string>
     <string name="jsdelivr_proxy_key">jsdelivr_proxy_key</string>
     <string name="download_path_key">download_path_key</string>

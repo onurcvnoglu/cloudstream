@@ -11,6 +11,7 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.preference.PreferenceManager
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.APIHolder.apis
 import com.lagradost.cloudstream3.APIHolder.getApiFromNameNull
@@ -457,8 +458,15 @@ class ResultViewModel2 : ViewModel() {
     private var currentResponse: LoadResponse? = null
     var EPISODE_RANGE_SIZE: Int = 20
     fun clear() {
+        currentDetailLoadJob?.cancel()
+        currentDetailLoadJob = null
         currentResponse = null
         _page.postValue(null)
+    }
+
+    override fun onCleared() {
+        currentDetailLoadJob?.cancel()
+        super.onCleared()
     }
 
     data class EpisodeIndexer(
@@ -1218,6 +1226,7 @@ class ResultViewModel2 : ViewModel() {
     }
 
     private var currentLoadLinkJob: Job? = null
+    private var currentDetailLoadJob: Job? = null
     private fun acquireSingleLink(
         result: ResultEpisode,
         sourceTypes: Set<ExtractorLinkType>,
@@ -2617,8 +2626,9 @@ class ResultViewModel2 : ViewModel() {
         dubStatus: DubStatus,
         autostart: AutoResume?,
         loadTrailers: Boolean = true,
-    ) =
-        ioSafe {
+    ): Job {
+        currentDetailLoadJob?.cancel()
+        return ioSafe {
             _page.postValue(Resource.Loading(url))
             _episodes.postValue(Resource.Loading())
 
@@ -2645,6 +2655,7 @@ class ResultViewModel2 : ViewModel() {
                     api
                 )
             }
+            if (!isActive) return@ioSafe
 
             if (validUrlResource !is Resource.Success) {
                 if (validUrlResource is Resource.Failure) {
@@ -2658,7 +2669,9 @@ class ResultViewModel2 : ViewModel() {
             val repo = APIRepository(api)
             currentRepo = repo
 
-            when (val data = repo.load(validUrl)) {
+            val loadData = repo.load(validUrl)
+            if (!isActive) return@ioSafe
+            when (val data = loadData) {
                 is Resource.Failure -> {
                     _page.postValue(data)
                 }
@@ -2666,7 +2679,14 @@ class ResultViewModel2 : ViewModel() {
                 is Resource.Success -> {
                     if (!isActive) return@ioSafe
                     val loadResponse = ioWork {
-                        applyMeta(data.value, currentMeta, currentSync).first
+                        val response = applyMeta(data.value, currentMeta, currentSync).first
+                        val tmdbFallbackEnabled = context?.let { appContext ->
+                            PreferenceManager.getDefaultSharedPreferences(appContext).getBoolean(
+                                appContext.getString(R.string.tmdb_metadata_fallback_key),
+                                false,
+                            )
+                        } ?: false
+                        if (tmdbFallbackEnabled) TmdbMetadataFallback.enrich(response) else response
                     }
                     if (!isActive) return@ioSafe
                     val mainId = loadResponse.getId()
@@ -2691,7 +2711,7 @@ class ResultViewModel2 : ViewModel() {
                     if (loadTrailers)
                         loadTrailers(data.value)
                     postSuccessful(
-                        data.value,
+                        loadResponse,
                         mainId,
                         updateEpisodes = true,
                         updateFillers = showFillers,
@@ -2705,5 +2725,6 @@ class ResultViewModel2 : ViewModel() {
                     debugException { "Invalid load result" }
                 }
             }
-        }
+        }.also { currentDetailLoadJob = it }
+    }
 }

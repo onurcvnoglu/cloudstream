@@ -34,6 +34,7 @@ import com.lagradost.cloudstream3.APIHolder.apis
 import com.lagradost.cloudstream3.AllLanguagesName
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.MainAPI
+import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.TvType
@@ -630,6 +631,9 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
     override fun onDestroyView() {
         (activity as? ComponentActivity)?.detachBackPressedCallback("HomeFragment_BackPress")
+        if (isLayout(TV or EMULATOR)) {
+            MainActivity.previewPopupDismissedEvent -= previewPopupDismissedCallback
+        }
         homeMasterAdapter?.cancelFocusRestore()
         bottomSheetDialog?.ownHide()
         homepageSnapshots = emptyMap()
@@ -655,6 +659,11 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
     private var bottomSheetDialog: BottomSheetDialog? = null
     private var homeMasterAdapter: HomeParentItemAdapterPreview? = null
     private var pendingHomeFocusRestore: HomeFocusRestoreTarget? = null
+    private val previewPopupDismissedCallback: (Unit) -> Unit = {
+        if (isLayout(TV or EMULATOR)) {
+            binding?.homeMasterRecycler?.post { restorePendingHomeFocus() }
+        }
+    }
     private var homepageSnapshots:
         Map<String, HomeViewModel.ExpandableHomepageList> = emptyMap()
 
@@ -714,6 +723,9 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
 
     @SuppressLint("SetTextI18n")
     override fun onBindingCreated(binding: FragmentHomeBinding) {
+        if (isLayout(TV or EMULATOR)) {
+            MainActivity.previewPopupDismissedEvent += previewPopupDismissedCallback
+        }
         context?.let { HomeChildItemAdapter.updatePosterSize(it) }
         (activity as? ComponentActivity)?.attachBackPressedCallback("HomeFragment_BackPress") {
             handleTvBackPress(this)
@@ -743,6 +755,10 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 },
             )
             homeMasterRecycler.setRecycledViewPool(ParentItemAdapter.sharedPool)
+            if (isLayout(TV or EMULATOR)) {
+                homeMasterRecycler.itemAnimator = null
+                homeMasterRecycler.setItemViewCacheSize(6)
+            }
             homeMasterRecycler.adapter = homeMasterAdapter
 
             homeApiFab.isVisible = isLayout(PHONE)

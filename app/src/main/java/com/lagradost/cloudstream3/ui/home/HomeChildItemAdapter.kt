@@ -1,12 +1,14 @@
 package com.lagradost.cloudstream3.ui.home
 
 import android.content.Context
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.core.view.doOnLayout
 import androidx.preference.PreferenceManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.SearchResponse
@@ -36,12 +38,9 @@ class HomeScrollViewHolderState(view: ViewBinding) : ViewHolderState<Boolean>(vi
     var restoreFocusEnabled: Boolean = true
     override fun save(): Boolean = wasFocused
     override fun restore(state: Boolean) {
-        if (state) {
-            wasFocused = false
-            // only refocus if tv
-            if (restoreFocusEnabled && isLayout(TV or EMULATOR)) {
-                itemView.requestFocus()
-            }
+        wasFocused = false
+        if (state && restoreFocusEnabled && isLayout(TV or EMULATOR)) {
+            itemView.requestFocus()
         }
     }
 }
@@ -153,9 +152,16 @@ open class HomeChildItemAdapter(
     private var fallbackFocusPending = false
 
     internal var automaticFocusRestoreEnabled: Boolean = true
+    internal var verticalFocusCallback: ((moveDown: Boolean) -> Boolean)? = null
 
-    internal fun clearSavedFocusStates() {
+    internal fun clearSavedFocusStates(recyclerView: RecyclerView? = null) {
         layoutManagerStates[id]?.entries?.removeAll { it.value as? Boolean == true }
+        recyclerView?.let { view ->
+            for (index in 0 until view.childCount) {
+                (view.getChildViewHolder(view.getChildAt(index)) as? HomeScrollViewHolderState)
+                    ?.wasFocused = false
+            }
+        }
     }
 
     internal fun focusKey(item: SearchResponse): String = homeFocusKey(item)
@@ -241,6 +247,8 @@ open class HomeChildItemAdapter(
     ) {
         applyBinding(holder, position == 0)
         (holder as? HomeScrollViewHolderState)?.apply {
+            // Recycled holders must not carry a previous category's transient focus state.
+            wasFocused = false
             itemKey = focusKey(item)
             restoreFocusEnabled = automaticFocusRestoreEnabled
         }
@@ -253,6 +261,17 @@ open class HomeChildItemAdapter(
                         holder.itemView.requestFocus()
                     }
                 }
+            }
+        }
+
+        holder.itemView.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN || !isLayout(TV or EMULATOR)) {
+                return@setOnKeyListener false
+            }
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> verticalFocusCallback?.invoke(true) == true
+                KeyEvent.KEYCODE_DPAD_UP -> verticalFocusCallback?.invoke(false) == true
+                else -> false
             }
         }
 

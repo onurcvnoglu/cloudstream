@@ -6,6 +6,10 @@ import android.os.Parcelable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.core.view.doOnAttach
+import androidx.core.view.doOnLayout
+import androidx.core.view.doOnNextLayout
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import com.lagradost.cloudstream3.LoadResponse
@@ -54,8 +58,6 @@ open class ParentItemAdapter(
         })
 ) {
     companion object {
-        private const val MAX_FOCUS_RESTORE_ATTEMPTS = 6
-
         val sharedPool =
             newSharedPool { setMaxRecycledViews(CONTENT, 4) }
     }
@@ -63,9 +65,9 @@ open class ParentItemAdapter(
     private var pendingFocusRestore: HomeFocusRestoreTarget? = null
     private var focusRestoreRecyclerView: RecyclerView? = null
     private var focusRestoreCompletion: ((HomeFocusRestoreTarget) -> Unit)? = null
-    private var focusRestoreAttemptPosted = false
-    private var focusRestoreAttempts = 0
+    private var focusRestoreAttemptScheduled = false
     private var focusRestoreGeneration = 0L
+    private var categoryFocusGeneration = 0L
 
     data class ParentItemHolder(val binding: ViewBinding) : ViewHolderState<Bundle>(binding) {
         var itemKey: String? = null
@@ -97,12 +99,14 @@ open class ParentItemAdapter(
         target: HomeFocusRestoreTarget,
         onComplete: ((HomeFocusRestoreTarget) -> Unit)? = null,
     ) {
-        if (pendingFocusRestore == target && focusRestoreRecyclerView === recyclerView) return
+        if (pendingFocusRestore == target && focusRestoreRecyclerView === recyclerView) {
+            scheduleFocusRestore()
+            return
+        }
 
         focusRestoreRecyclerView?.let { setChildAutomaticFocusRestore(it, enabled = true) }
         focusRestoreGeneration++
-        focusRestoreAttemptPosted = false
-        focusRestoreAttempts = 0
+        focusRestoreAttemptScheduled = false
         pendingFocusRestore = target
         focusRestoreRecyclerView = recyclerView
         focusRestoreCompletion = onComplete
@@ -116,27 +120,36 @@ open class ParentItemAdapter(
         pendingFocusRestore = null
         focusRestoreRecyclerView = null
         focusRestoreCompletion = null
-        focusRestoreAttemptPosted = false
-        focusRestoreAttempts = 0
+        focusRestoreAttemptScheduled = false
     }
 
     private fun orderedItems(): List<HomeViewModel.ExpandableHomepageList> = immutableCurrentList
 
     private fun scheduleFocusRestore() {
         val recyclerView = focusRestoreRecyclerView ?: return
-        if (pendingFocusRestore == null || !recyclerView.isAttachedToWindow) return
-        if (focusRestoreAttemptPosted) return
+        if (pendingFocusRestore == null || focusRestoreAttemptScheduled) return
 
         val generation = focusRestoreGeneration
-        focusRestoreAttemptPosted = true
-        recyclerView.post {
-            if (generation != focusRestoreGeneration) return@post
-            focusRestoreAttemptPosted = false
-            if (++focusRestoreAttempts > MAX_FOCUS_RESTORE_ATTEMPTS) {
-                completeFocusRestore()
-            } else {
-                attemptFocusRestore()
+        focusRestoreAttemptScheduled = true
+        if (!recyclerView.isAttachedToWindow) {
+            recyclerView.doOnAttach {
+                if (generation != focusRestoreGeneration) return@doOnAttach
+                focusRestoreAttemptScheduled = false
+                scheduleFocusRestore()
             }
+            return
+        }
+        recyclerView.doOnLayout {
+            if (generation != focusRestoreGeneration) return@doOnLayout
+            focusRestoreAttemptScheduled = false
+            attemptFocusRestore()
+        }
+    }
+
+    private fun scheduleFocusRestoreAfterLayout(view: View) {
+        val generation = focusRestoreGeneration
+        view.doOnNextLayout {
+            if (generation == focusRestoreGeneration) scheduleFocusRestore()
         }
     }
 
@@ -145,7 +158,6 @@ open class ParentItemAdapter(
         val recyclerView = focusRestoreRecyclerView ?: return
         val items = orderedItems()
         if (items.isEmpty()) {
-            scheduleFocusRestore()
             return
         }
 
@@ -169,7 +181,7 @@ open class ParentItemAdapter(
 
         val parentHolder = recyclerView.findViewHolderForAdapterPosition(parentAdapterPosition)
             as? ParentItemHolder ?: run {
-            scheduleFocusRestore()
+            scheduleFocusRestoreAfterLayout(recyclerView)
             return
         }
         val binding = parentHolder.binding as? HomepageParentBinding ?: run {
@@ -178,7 +190,7 @@ open class ParentItemAdapter(
         }
         val childRecyclerView = binding.homeChildRecyclerview
         val childAdapter = childRecyclerView.adapter as? HomeChildItemAdapter ?: run {
-            scheduleFocusRestore()
+            scheduleFocusRestoreAfterLayout(childRecyclerView)
             return
         }
         childAdapter.automaticFocusRestoreEnabled = false
@@ -187,7 +199,7 @@ open class ParentItemAdapter(
         val sourceKeys = category.list.list.map(::homeFocusKey)
         val childKeys = childAdapter.immutableCurrentList.map(::homeFocusKey)
         if (sourceKeys != childKeys) {
-            childRecyclerView.post { scheduleFocusRestore() }
+            scheduleFocusRestoreAfterLayout(childRecyclerView)
             return
         }
 
@@ -199,21 +211,21 @@ open class ParentItemAdapter(
             homeFocusKey(it) == targetKey
         }
         if (childPosition < 0) {
-            childRecyclerView.post { scheduleFocusRestore() }
+            scheduleFocusRestoreAfterLayout(childRecyclerView)
             return
         }
 
         childRecyclerView.scrollToPosition(childPosition)
         val childHolder = childRecyclerView.findViewHolderForAdapterPosition(childPosition)
             ?: run {
-                childRecyclerView.post { scheduleFocusRestore() }
+                scheduleFocusRestoreAfterLayout(childRecyclerView)
                 return
             }
 
         if (childHolder.itemView.hasFocus() || childHolder.itemView.requestFocus()) {
             completeFocusRestore()
         } else {
-            childRecyclerView.post { scheduleFocusRestore() }
+            scheduleFocusRestoreAfterLayout(childRecyclerView)
         }
     }
 
@@ -221,10 +233,11 @@ open class ParentItemAdapter(
         for (index in 0 until recyclerView.childCount) {
             val holder = recyclerView.getChildViewHolder(recyclerView.getChildAt(index))
                 as? ParentItemHolder ?: continue
-            val childAdapter = (holder.binding as? HomepageParentBinding)
-                ?.homeChildRecyclerview?.adapter as? HomeChildItemAdapter ?: continue
+            val childRecyclerView = (holder.binding as? HomepageParentBinding)
+                ?.homeChildRecyclerview ?: continue
+            val childAdapter = childRecyclerView.adapter as? HomeChildItemAdapter ?: continue
             childAdapter.automaticFocusRestoreEnabled = enabled
-            if (enabled) childAdapter.clearSavedFocusStates()
+            if (enabled) childAdapter.clearSavedFocusStates(childRecyclerView)
         }
     }
 
@@ -237,6 +250,43 @@ open class ParentItemAdapter(
         val completion = focusRestoreCompletion
         focusRestoreCompletion = null
         completion?.invoke(target)
+    }
+
+    private fun moveFocusToAdjacentCategory(
+        parentRecyclerView: RecyclerView,
+        holder: ParentItemHolder,
+        moveDown: Boolean,
+    ): Boolean {
+        val currentIndex = orderedItems().indexOfFirst { it.list.name == holder.itemKey }
+        if (currentIndex < 0) return false
+
+        val nextIndex = if (moveDown) {
+            (currentIndex + 1 until orderedItems().size).firstOrNull { index ->
+                orderedItems()[index].list.list.isNotEmpty()
+            }
+        } else {
+            (currentIndex - 1 downTo 0).firstOrNull { index ->
+                orderedItems()[index].list.list.isNotEmpty()
+            }
+        } ?: return false
+
+        val generation = ++categoryFocusGeneration
+        parentRecyclerView.scrollToPosition(HomeFocusRestorePlanner.adapterPosition(nextIndex, headers))
+        parentRecyclerView.doOnNextLayout {
+            if (generation != categoryFocusGeneration) return@doOnNextLayout
+            val nextHolder = parentRecyclerView.findViewHolderForAdapterPosition(
+                HomeFocusRestorePlanner.adapterPosition(nextIndex, headers)
+            ) as? ParentItemHolder ?: return@doOnNextLayout
+            val childRecyclerView = (nextHolder.binding as? HomepageParentBinding)
+                ?.homeChildRecyclerview ?: return@doOnNextLayout
+            childRecyclerView.scrollToPosition(0)
+            childRecyclerView.doOnNextLayout {
+                if (generation != categoryFocusGeneration) return@doOnNextLayout
+                childRecyclerView.findViewHolderForAdapterPosition(0)
+                    ?.itemView?.requestFocus()
+            }
+        }
+        return true
     }
 
     private fun childClickCallback(holder: ParentItemHolder): (SearchClickCallback) -> Unit = { callback ->
@@ -289,6 +339,14 @@ open class ParentItemAdapter(
             ).also { binding.homeChildRecyclerview.adapter = it }
         childAdapter.apply {
             automaticFocusRestoreEnabled = pendingFocusRestore == null
+            verticalFocusCallback = { moveDown ->
+                val parentRecyclerView = binding.root.parent as? RecyclerView
+                if (parentRecyclerView == null) {
+                    false
+                } else {
+                    moveFocusToAdjacentCategory(parentRecyclerView, holder, moveDown)
+                }
+            }
             isHorizontal = info.isHorizontalImages
             hasNext = item.hasNext
             if (immutableCurrentList != info.list) {
@@ -340,7 +398,13 @@ open class ParentItemAdapter(
             isHorizontal = true,
             nextLeft = R.id.nav_rail_view,
             nextRight = FOCUS_SELF,
+            coalesceTvScroll = true,
         )
+        if (isLayout(TV or EMULATOR)) {
+            childRecyclerView.itemAnimator = null
+            childRecyclerView.setItemViewCacheSize(8)
+            (childRecyclerView.layoutManager as? LinearLayoutManager)?.initialPrefetchItemCount = 4
+        }
         childRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
                 super.onScrollStateChanged(recyclerView, newState)

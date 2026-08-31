@@ -130,8 +130,13 @@ object SearchResultBuilder {
             textQuality?.isVisible = false
         }
 
-        cardText?.text = card.name
-        cardText?.isVisible = showTitle
+        val isResumeWatching = card is DataStoreHelper.ResumeWatchingResult
+        cardText?.text = if (isResumeWatching) {
+            cardText.context.getString(R.string.resume_watching_title_format, card.name, card.apiName)
+        } else {
+            card.name
+        }
+        cardText?.isVisible = showTitle || isResumeWatching
         cardView.isVisible = true
         if (!card.posterUrl.isNullOrEmpty()) {
             cardView.loadImage(card.posterUrl, card.posterHeaders) {
