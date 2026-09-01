@@ -13,8 +13,7 @@ internal fun ExtractorLink.sourceId(): String? {
 internal fun selectPreferredLink(
     links: List<DisplayLink>,
     preferredSource: String?,
-    subtitles: Iterable<SubtitleData> = emptyList(),
-    languageTag: String? = null,
+    preferredSubtitle: SubtitlePreference? = null,
 ): DisplayLink? {
     val usableLinks = links.filter { it.shouldUseLink }
     val source = preferredSource?.takeIf { it.isNotBlank() }
@@ -23,14 +22,8 @@ internal fun selectPreferredLink(
         usableLinks.firstOrNull { it.link.first?.sourceId() == preferred }?.let { return it }
     }
 
-    val language = languageTag?.takeIf { it.isNotBlank() }
-    if (source == null && language != null) {
-        usableLinks.firstOrNull { displayLink ->
-            val linkSource = displayLink.link.first?.sourceId() ?: return@firstOrNull false
-            subtitles.any { subtitle ->
-                subtitle.source == linkSource && subtitle.matchesLanguageCode(language)
-            }
-        }?.let { return it }
+    preferredSubtitle?.source?.takeIf { it.isNotBlank() }?.let { subtitleSource ->
+        usableLinks.firstOrNull { it.link.first?.sourceId() == subtitleSource }?.let { return it }
     }
 
     return usableLinks.firstOrNull()

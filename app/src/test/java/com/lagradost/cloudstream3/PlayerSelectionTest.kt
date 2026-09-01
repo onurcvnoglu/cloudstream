@@ -56,25 +56,21 @@ class PlayerSelectionTest {
     }
 
     @Test
-    fun `subtitle language selects the first matching source in sorted order`() {
+    fun `preferred subtitle source selects before profile fallback`() {
         val links = listOf(
             DisplayLink(link("source1") to null, shouldUseLink = true, priority = 100),
             DisplayLink(link("source2") to null, shouldUseLink = true, priority = 90),
             DisplayLink(link("source3") to null, shouldUseLink = true, priority = 80),
         )
-        val subtitles = listOf(
-            subtitle("English", "source1", languageCode = "en"),
-            subtitle("Türkçe", "source2"),
-            subtitle("Türkçe", "source3"),
-        )
+        val preferredSubtitle = subtitle("Türkçe", "source2").toSubtitlePreference()
 
         assertEquals(
             "source2",
-            selectPreferredLink(links, null, subtitles, "tr")?.link?.first?.source
+            selectPreferredLink(links, null, preferredSubtitle)?.link?.first?.source
         )
         assertEquals(
             "source2",
-            selectPreferredLink(links, "source2", subtitles, "en")?.link?.first?.source
+            selectPreferredLink(links, "source2", preferredSubtitle)?.link?.first?.source
         )
     }
 
@@ -93,16 +89,23 @@ class PlayerSelectionTest {
 
         assertEquals(
             "source1",
-            selectPreferredLink(links, null, subtitles, "tr")?.link?.first?.source
-        )
-        assertEquals(
-            "source1",
-            selectPreferredLink(links, null, subtitles, "en")?.link?.first?.source
+            selectPreferredLink(links, null)?.link?.first?.source
         )
         assertEquals(
             false,
             hasSourceLinkedSubtitle(links, subtitles, "tr")
         )
+    }
+
+    @Test
+    fun `missing preferred subtitle source falls back to sorted usable link`() {
+        val links = listOf(
+            DisplayLink(link("source1") to null, shouldUseLink = true, priority = 100),
+            DisplayLink(link("source2") to null, shouldUseLink = true, priority = 90),
+        )
+        val preference = subtitle("Türkçe", "missing").toSubtitlePreference()
+
+        assertEquals("source1", selectPreferredLink(links, null, preference)?.link?.first?.source)
     }
 
     @Test

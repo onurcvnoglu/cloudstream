@@ -81,9 +81,7 @@ import com.lagradost.cloudstream3.ui.player.CS3IPlayer.Companion.preferredAudioT
 import com.lagradost.cloudstream3.ui.player.CustomDecoder.Companion.updateForcedEncoding
 import com.lagradost.cloudstream3.ui.player.PlayerSubtitleHelper.Companion.toSubtitleMimeType
 import com.lagradost.cloudstream3.ui.player.source_priority.LinkSource
-import com.lagradost.cloudstream3.ui.player.source_priority.ProfileSettings
 import com.lagradost.cloudstream3.ui.player.source_priority.QualityDataHelper
-import com.lagradost.cloudstream3.ui.player.source_priority.QualityDataHelper.getLinkPriority
 import com.lagradost.cloudstream3.ui.player.source_priority.QualityProfileDialog
 import com.lagradost.cloudstream3.ui.result.ACTION_CLICK_DEFAULT
 import com.lagradost.cloudstream3.ui.result.EpisodeAdapter
@@ -193,6 +191,7 @@ class GeneratorPlayer : FullScreenPlayer() {
     private var preferredAutoSelectSubtitles: String? = null // null means do nothing, "" means none
     private var preferredSource: String? = null
     private var preferredSubtitle: SubtitlePreference? = null
+    private var playbackPreferenceId: Int? = null
     private val subtitleTranslationController = SubtitleTranslationController()
     private var subtitleTranslationJob: Job? = null
     private var failedSubtitleTranslationAttempt: String? = null
@@ -221,6 +220,7 @@ class GeneratorPlayer : FullScreenPlayer() {
                 viewModel.updateSubtitleFallbackLanguage(subtitleLanguageTagIETF)
             }
             preferredSubtitle = subtitle?.toSubtitlePreference() ?: noSubtitlePreference()
+            savePlaybackPreference()
         }
 
         currentSelectedSubtitles = subtitle
@@ -230,7 +230,78 @@ class GeneratorPlayer : FullScreenPlayer() {
 
 
     private fun rememberSourcePreference(link: VideoLink?) {
-        link?.first?.sourceId()?.let { preferredSource = it }
+        val source = link?.first?.sourceId()
+        preferredSource = source
+
+        // A subtitle tied to the previous source cannot safely be carried to the new source.
+        if (preferredSubtitle?.source?.takeIf { it.isNotBlank() }?.let { it != source } == true) {
+            preferredSubtitle = null
+            currentSelectedSubtitles = null
+        }
+        savePlaybackPreference()
+    }
+
+    private fun getPlaybackPreferenceMeta(index: Int = viewModel.episodeIndex): Any? {
+        val generatorState = viewModel.state.generatorState
+        return if (generatorState?.index == index) {
+            generatorState.meta
+        } else {
+            viewModel.generator?.videos?.getOrNull(index)
+        }
+    }
+
+    private fun getPlaybackPreferenceId(index: Int = viewModel.episodeIndex): Int? {
+        return when (val meta = getPlaybackPreferenceMeta(index)) {
+            is ResultEpisode -> meta.parentId
+            is ExtractorUri -> meta.parentId
+            else -> null
+        }
+    }
+
+    private fun restorePlaybackPreference(index: Int = viewModel.episodeIndex) {
+        val parentId = getPlaybackPreferenceId(index)
+        if (parentId == playbackPreferenceId) return
+
+        playbackPreferenceId = parentId
+        val preference = parentId?.let { DataStoreHelper.getPlaybackSelectionPreference(it) }
+        preferredSource = preference?.sourceId?.takeIf { it.isNotBlank() }
+        preferredSubtitle = preference?.subtitle?.toSubtitlePreference()
+    }
+
+    private fun savePlaybackPreference() {
+        val parentId = playbackPreferenceId ?: getPlaybackPreferenceId()
+        if (parentId == null) return
+
+        DataStoreHelper.setPlaybackSelectionPreference(
+            parentId,
+            DataStoreHelper.PlaybackSelectionPreference(
+                sourceId = preferredSource?.takeIf { it.isNotBlank() },
+                subtitle = preferredSubtitle?.toPlaybackSubtitlePreference(),
+            )
+        )
+    }
+
+    private fun SubtitlePreference.toPlaybackSubtitlePreference(): DataStoreHelper.PlaybackSubtitlePreference {
+        return DataStoreHelper.PlaybackSubtitlePreference(
+            languageTag = languageTag,
+            originalName = originalName,
+            origin = origin.name,
+            source = source?.takeIf { it.isNotBlank() },
+            isNone = isNone,
+        )
+    }
+
+    private fun DataStoreHelper.PlaybackSubtitlePreference.toSubtitlePreference(): SubtitlePreference? {
+        if (isNone) return noSubtitlePreference()
+        val subtitleOrigin = SubtitleOrigin.entries.firstOrNull { it.name == origin } ?: return null
+        if (originalName.isBlank()) return null
+
+        return SubtitlePreference(
+            languageTag = languageTag?.takeIf { it.isNotBlank() },
+            originalName = originalName,
+            origin = subtitleOrigin,
+            source = source?.takeIf { it.isNotBlank() },
+        )
     }
 
     private fun isSubtitleForLink(subtitle: SubtitleData?, link: VideoLink?): Boolean {
@@ -930,7 +1001,7 @@ class GeneratorPlayer : FullScreenPlayer() {
         player.saveData()
         player.reloadPlayer(ctx)
 
-        setSubtitles(selectedSubtitle, false)
+        setSubtitles(selectedSubtitle, true)
 
         selectSourceDialog?.dismissSafe()
         selectSourceDialog = null
@@ -1414,7 +1485,8 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
 
                 binding.applyBtt.setOnClickListener {
-                    var init = sourceIndex != startSource
+                    val sourceChanged = sourceIndex != startSource
+                    var init = sourceChanged
                     val selectedLink = filteredLinks.getOrNull(sourceIndex)?.link
                     if (subtitleGroupIndex != subtitleGroupIndexStart || subtitleOptionIndex != subtitleOptionIndexStart) {
                         init = init or if (subtitleGroupIndex <= 0) {
@@ -1429,7 +1501,9 @@ class GeneratorPlayer : FullScreenPlayer() {
                     }
                     if (init) {
                         selectedLink?.let {
-                            rememberSourcePreference(it)
+                            if (sourceChanged) {
+                                rememberSourcePreference(it)
+                            }
                             loadLink(it, true)
                         }
                     }
@@ -1656,22 +1730,26 @@ class GeneratorPlayer : FullScreenPlayer() {
         val preferredLink = selectPreferredLink(
             links,
             preferred,
-            subtitles,
-            autoSubtitleLanguage,
+            preferredSubtitle,
         )
 
-        // While loading, wait for an explicitly selected source or a source-linked subtitle match
-        // instead of starting a faster fallback source. Terminal loading state and skip allow fallback.
+        val hasExplicitPreference = preferred != null || preferredSubtitle != null
+        val preferredLinkSource = preferredLink?.link?.first?.sourceId()
         val waitingForPreferredSource = preferred != null &&
-                preferredLink?.link?.first?.sourceId() != preferred
-        val waitingForSubtitleSource = preferred == null &&
-                autoSubtitleLanguage != null &&
-                !hasSourceLinkedSubtitle(links, subtitles, autoSubtitleLanguage)
-        val waitingForSubtitleTranslation = autoTranslateSubtitles &&
+                preferredLinkSource != preferred
+        val preferredSubtitleSource = preferredSubtitle?.source?.takeIf { it.isNotBlank() }
+        val waitingForPreferredSubtitleSource = preferred == null &&
+                preferredSubtitleSource != null && preferredLinkSource != preferredSubtitleSource
+        val waitingForPreferredSubtitle = preferredSubtitle != null &&
+                preferredSubtitle?.isNone != true &&
+                selectPreferredSubtitle(subtitles, preferredSubtitle, preferredLinkSource) == null
+        val waitingForSubtitleTranslation = !hasExplicitPreference && autoTranslateSubtitles &&
                 autoSubtitleLanguage != null &&
                 subtitles.none { it.matchesLanguageCode(autoSubtitleLanguage) }
         if (viewModel.state.loading is Resource.Loading &&
-            (waitingForPreferredSource || waitingForSubtitleSource || waitingForSubtitleTranslation)
+            (!hasExplicitPreference || waitingForPreferredSource ||
+                    waitingForPreferredSubtitleSource || waitingForPreferredSubtitle ||
+                    waitingForSubtitleTranslation)
         ) {
             return
         }
@@ -1747,6 +1825,7 @@ class GeneratorPlayer : FullScreenPlayer() {
         if (viewModel.hasNextEpisode() == true) {
             isNextEpisode = true
             releasePlayer()
+            restorePlaybackPreference(viewModel.episodeIndex + 1)
             viewModel.loadLinksNext()
         }
     }
@@ -1755,6 +1834,7 @@ class GeneratorPlayer : FullScreenPlayer() {
         if (viewModel.hasPrevEpisode() == true) {
             isNextEpisode = true
             releasePlayer()
+            restorePlaybackPreference(viewModel.episodeIndex - 1)
             viewModel.loadLinksPrev()
         }
     }
@@ -2381,7 +2461,10 @@ class GeneratorPlayer : FullScreenPlayer() {
                             isNextEpisode = false
                             releasePlayer()
                             playerEpisodeOverlay.isGone = true
-                            episodeClick.position?.let { viewModel.loadThisEpisode(it) }
+                            episodeClick.position?.let {
+                                restorePlaybackPreference(it)
+                                viewModel.loadThisEpisode(it)
+                            }
                         }
                     },
                     { downloadClickEvent ->
@@ -2488,6 +2571,7 @@ class GeneratorPlayer : FullScreenPlayer() {
             return
         }
         viewModel.attachGenerator(generator, index)
+        restorePlaybackPreference(index)
 
         context?.let { ctx ->
             val settingsManager = PreferenceManager.getDefaultSharedPreferences(ctx)
@@ -2579,15 +2663,8 @@ class GeneratorPlayer : FullScreenPlayer() {
                 autoSelectSubtitles()
             }
 
-            // A subtitle callback may arrive after its link callback. Retry only when the
-            // source-language relation is now available; otherwise keep the existing fast-start rules.
-            val autoSubtitleLanguage = preferredAutoSelectSubtitles?.takeIf { it.isNotBlank() }
-            if (!isPlayerActive.get() && hasSourceLinkedSubtitle(
-                    viewModel.state.sortLinks(currentQualityProfile),
-                    subtitles,
-                    autoSubtitleLanguage,
-                )
-            ) {
+            // A preferred subtitle may arrive after its preferred source; retry the explicit choice.
+            if (!isPlayerActive.get() && (preferredSource != null || preferredSubtitle != null)) {
                 startPlayer()
             }
         }
@@ -2636,27 +2713,10 @@ class GeneratorPlayer : FullScreenPlayer() {
                 }
             }
 
-            safe {
-                val preferred = preferredSource?.takeIf { it.isNotBlank() }
-                val preferredAvailable = preferred != null && sortedLinks.any {
-                    it.shouldUseLink && it.link.first?.sourceId() == preferred
-                }
-                val autoSubtitleLanguage = preferredAutoSelectSubtitles?.takeIf { it.isNotBlank() }
-                val hasAutoSubtitleLink = preferred == null && hasSourceLinkedSubtitle(
-                    sortedLinks,
-                    viewModel.state.subtitles,
-                    autoSubtitleLanguage,
-                )
-                val hasAutoStartLink = if (preferred != null) {
-                    preferredAvailable
-                } else {
-                    hasAutoSubtitleLink || viewModel.state.links.any { link ->
-                        getLinkPriority(currentQualityProfile, link.first) >=
-                                QualityDataHelper.AUTO_SKIP_PRIORITY
-                    }
-                }
-
-                if (!isPlayerActive.get() && hasAutoStartLink) {
+            // Explicit choices may start as soon as their link is available. Without one,
+            // startPlayer waits for the terminal loading state and chooses the final sorted list.
+            if (!isPlayerActive.get() && (preferredSource != null || preferredSubtitle != null)) {
+                safe {
                     startPlayer()
                 }
             }

@@ -56,6 +56,7 @@ const val RESULT_RESUME_WATCHING_HAS_MIGRATED = "result_resume_watching_migrated
 const val RESULT_EPISODE = "result_episode"
 const val RESULT_SEASON = "result_season"
 const val RESULT_DUB = "result_dub"
+const val VIDEO_PLAYBACK_SELECTION = "video_playback_selection"
 const val KEY_RESULT_SORT = "result_sort"
 const val USER_PINNED_PROVIDERS = "user_pinned_providers" // Key for pinned user set
 
@@ -244,6 +245,21 @@ object DataStoreHelper {
     data class PosDur(
         @JsonProperty("position") @SerialName("position") val position: Long,
         @JsonProperty("duration") @SerialName("duration") val duration: Long,
+    )
+
+    @Serializable
+    data class PlaybackSubtitlePreference(
+        @JsonProperty("languageTag") @SerialName("languageTag") val languageTag: String? = null,
+        @JsonProperty("originalName") @SerialName("originalName") val originalName: String = "",
+        @JsonProperty("origin") @SerialName("origin") val origin: String = "",
+        @JsonProperty("source") @SerialName("source") val source: String? = null,
+        @JsonProperty("isNone") @SerialName("isNone") val isNone: Boolean = false,
+    )
+
+    @Serializable
+    data class PlaybackSelectionPreference(
+        @JsonProperty("sourceId") @SerialName("sourceId") val sourceId: String? = null,
+        @JsonProperty("subtitle") @SerialName("subtitle") val subtitle: PlaybackSubtitlePreference? = null,
     )
 
     fun PosDur.fixVisual(): PosDur {
@@ -603,6 +619,29 @@ object DataStoreHelper {
             "$currentAccount/$RESULT_RESUME_WATCHING",
             id.toString(),
         )
+    }
+
+    fun getPlaybackSelectionPreference(parentId: Int?): PlaybackSelectionPreference? {
+        if (parentId == null) return null
+        return getKey<PlaybackSelectionPreference>(
+            "$currentAccount/$VIDEO_PLAYBACK_SELECTION",
+            parentId.toString(),
+        )
+    }
+
+    fun setPlaybackSelectionPreference(parentId: Int?, preference: PlaybackSelectionPreference?) {
+        if (parentId == null) return
+        val folder = "$currentAccount/$VIDEO_PLAYBACK_SELECTION"
+        if (preference == null || (preference.sourceId == null && preference.subtitle == null)) {
+            removeKey(folder, parentId.toString())
+        } else {
+            setKey(folder, parentId.toString(), preference)
+        }
+    }
+
+    fun removePlaybackSelectionPreference(parentId: Int?) {
+        if (parentId == null) return
+        removeKey("$currentAccount/$VIDEO_PLAYBACK_SELECTION", parentId.toString())
     }
 
     private fun getLastWatchedOld(id: Int?): DownloadObjects.ResumeWatching? {
