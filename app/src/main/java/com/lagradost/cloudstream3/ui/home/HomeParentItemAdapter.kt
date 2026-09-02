@@ -21,6 +21,7 @@ import com.lagradost.cloudstream3.ui.BaseDiffCallback
 import com.lagradost.cloudstream3.ui.ViewHolderState
 import com.lagradost.cloudstream3.ui.newSharedPool
 import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
+import com.lagradost.cloudstream3.ui.result.attachNestedHorizontalTouchListener
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_FOCUSED
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_LOAD
@@ -394,16 +395,23 @@ open class ParentItemAdapter(
         val holder = ParentItemHolder(binding)
         val childRecyclerView = binding.homeChildRecyclerview
         childRecyclerView.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
+        // Kart boyutları sabit olduğundan ebeveyn hiyerarşisinin gereksiz layout hesaplamasını engelle
+        childRecyclerView.setHasFixedSize(true)
+        // Hızlı kaydırma ve sayfalama sırasında animasyonların yol açtığı titreme ve gecikmeyi önle
+        childRecyclerView.itemAnimator = null
+        // Hızlı sağa/sola kaydırmada kartların yeniden oluşturulmasını önlemek için önbellek boyutunu genişlet
+        childRecyclerView.setItemViewCacheSize(10)
+        // Kullanıcı hızlıca yatay kaydırırken dikey listenin dokunmayı kesip titremeye yol açmasını engelle
+        childRecyclerView.attachNestedHorizontalTouchListener()
         childRecyclerView.setLinearListLayout(
             isHorizontal = true,
             nextLeft = R.id.nav_rail_view,
             nextRight = FOCUS_SELF,
             coalesceTvScroll = true,
         )
-        if (isLayout(TV or EMULATOR)) {
-            childRecyclerView.itemAnimator = null
-            childRecyclerView.setItemViewCacheSize(8)
-            (childRecyclerView.layoutManager as? LinearLayoutManager)?.initialPrefetchItemCount = 4
+        (childRecyclerView.layoutManager as? LinearLayoutManager)?.apply {
+            isItemPrefetchEnabled = true
+            initialPrefetchItemCount = 4
         }
         childRecyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {

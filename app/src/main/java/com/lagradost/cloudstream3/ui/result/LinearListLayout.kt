@@ -1,19 +1,70 @@
 package com.lagradost.cloudstream3.ui.result
 
 import android.content.Context
+import android.util.DisplayMetrics
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
 import com.lagradost.cloudstream3.FocusDirection
 import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
+import kotlin.math.abs
 
 const val FOCUS_SELF = View.NO_ID - 1
 const val FOCUS_INHERIT = FOCUS_SELF - 1
+
+/**
+ * Yatay kategori listelerinde kullanıcının sağa/sola hızlı kaydırması sırasında
+ * dikey üst RecyclerView'ın (ana sayfa dikey listesi) dokunma hareketini kesmesini (intercept)
+ * önleyen ve dikey kaydırma ile yatay kaydırma arasındaki titreme/çatışmayı çözen dinleyici.
+ */
+fun RecyclerView.attachNestedHorizontalTouchListener() {
+    val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    addOnItemTouchListener(object : RecyclerView.SimpleOnItemTouchListener() {
+        private var startX = 0f
+        private var startY = 0f
+        private var isHorizontalDragging = false
+
+        override fun onInterceptTouchEvent(rv: RecyclerView, e: MotionEvent): Boolean {
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = e.x
+                    startY = e.y
+                    isHorizontalDragging = false
+                    // İlk basış anında ebeveyn dikey listenin olası yatay kaydırmayı bölmesini engelle
+                    rv.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = abs(e.x - startX)
+                    val dy = abs(e.y - startY)
+                    if (!isHorizontalDragging) {
+                        if (dx > touchSlop && dx > dy) {
+                            // Yatay hareket dikeyden belirgin şekilde fazla; kaydırma sahipliğini yatayda tut
+                            isHorizontalDragging = true
+                            rv.parent?.requestDisallowInterceptTouchEvent(true)
+                        } else if (dy > touchSlop && dy > dx) {
+                            // Dikey kaydırma baskınsa ebeveyn dikey listeye izin ver
+                            rv.parent?.requestDisallowInterceptTouchEvent(false)
+                        }
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    isHorizontalDragging = false
+                    rv.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+            }
+            return false
+        }
+    })
+}
 
 fun RecyclerView?.setLinearListLayout(
     isHorizontal: Boolean = true,
@@ -49,9 +100,7 @@ open class LinearListLayout(context: Context?) :
 
     private var pendingFocusPosition = RecyclerView.NO_POSITION
     var coalesceTvScroll: Boolean = false
-    private var pendingHorizontalScroll = 0
-    private var horizontalScrollPosted = false
-    private var horizontalScrollParent: RecyclerView? = null
+    private var activeTargetPosition = RecyclerView.NO_POSITION
 
     fun setHorizontal() {
         orientation = HORIZONTAL
@@ -89,7 +138,13 @@ open class LinearListLayout(context: Context?) :
                 findViewByPosition(position)?.takeIf { it.isFocusable }?.requestFocus()
             }
         }
-        scrollToPosition(position)
+        // TV ve emülatörde henüz ekranda olmayan kart hizalanırken ani sıçramayı önlemek için ofsetli konumlandır
+        if (isLayout(TV or EMULATOR) && orientation == HORIZONTAL) {
+            val offset = if (isLayoutRTL) 0 else recyclerView.paddingLeft
+            scrollToPositionWithOffset(position, offset)
+        } else {
+            scrollToPosition(position)
+        }
         return focused
     }
 
@@ -225,38 +280,75 @@ open class LinearListLayout(context: Context?) :
         immediate: Boolean,
         focusedChildVisible: Boolean
     ): Boolean {
-        if (isLayout(TV) && orientation == HORIZONTAL) {
+        if (isLayout(TV or EMULATOR) && orientation == HORIZONTAL) {
+            val position = getPosition(child)
+            if (position == RecyclerView.NO_POSITION) return false
+
             val dx = when {
                 isLayoutRTL -> getDecoratedRight(child) - (parent.width - parent.paddingRight)
                 else -> getDecoratedLeft(child) - parent.paddingLeft
             }
-            return if (dx != 0) {
-                when {
-                    immediate -> {
-                        parent.stopScroll()
-                        parent.scrollBy(dx, 0)
-                    }
-                    coalesceTvScroll -> {
-                        pendingHorizontalScroll = dx
-                        horizontalScrollParent = parent
-                        parent.stopScroll()
-                        if (!horizontalScrollPosted) {
-                            horizontalScrollPosted = true
-                            parent.postOnAnimation {
-                                horizontalScrollPosted = false
-                                val scrollParent = horizontalScrollParent ?: return@postOnAnimation
-                                val pendingScroll = pendingHorizontalScroll
-                                pendingHorizontalScroll = 0
-                                if (pendingScroll != 0) scrollParent.smoothScrollBy(pendingScroll, 0)
+
+            if (dx == 0) {
+                activeTargetPosition = position
+                return false
+            }
+
+            if (immediate) {
+                activeTargetPosition = position
+                if (parent.isComputingLayout) {
+                    parent.post {
+                        if (!parent.isComputingLayout) {
+                            val currentDx = when {
+                                isLayoutRTL -> getDecoratedRight(child) - (parent.width - parent.paddingRight)
+                                else -> getDecoratedLeft(child) - parent.paddingLeft
+                            }
+                            if (currentDx != 0) {
+                                parent.stopScroll()
+                                parent.scrollBy(currentDx, 0)
                             }
                         }
                     }
-                    else -> parent.smoothScrollBy(dx, 0)
+                } else {
+                    parent.stopScroll()
+                    parent.scrollBy(dx, 0)
                 }
-                true
-            } else {
-                false
+                return true
             }
+
+            // Halihazırda bu karta doğru akıcı kaydırma devam ediyorsa animasyonu kesip sıfırdan başlatma
+            if (isSmoothScrolling && activeTargetPosition == position) {
+                return true
+            }
+
+            activeTargetPosition = position
+
+            // TV yatay kategorisinde seri D-pad basışlarında animasyonu kesip titremeye yol açan
+            // stopScroll() yerine, hedef konuma kesintisiz ve akıcı kayan LinearSmoothScroller kullanılır
+            val scroller = object : LinearSmoothScroller(parent.context) {
+                override fun getHorizontalSnapPreference(): Int =
+                    if (isLayoutRTL) SNAP_TO_END else SNAP_TO_START
+
+                override fun calculateSpeedPerPixel(displayMetrics: DisplayMetrics): Float {
+                    // Seri sağ/sol geçişlerinde gecikmeyi önleyen ve akıcılık sağlayan piksel başına hız
+                    return 14f / displayMetrics.densityDpi
+                }
+
+                override fun calculateTimeForScrolling(dx: Int): Int {
+                    // Hızlı geçişlerde kaydırmanın geride kalmasını önleyen üst süre sınırı (ms)
+                    return minOf(140, super.calculateTimeForScrolling(dx))
+                }
+
+                override fun onStop() {
+                    super.onStop()
+                    if (activeTargetPosition == targetPosition) {
+                        activeTargetPosition = RecyclerView.NO_POSITION
+                    }
+                }
+            }
+            scroller.targetPosition = position
+            startSmoothScroll(scroller)
+            return true
         } else {
             return super.requestChildRectangleOnScreen(
                 parent,

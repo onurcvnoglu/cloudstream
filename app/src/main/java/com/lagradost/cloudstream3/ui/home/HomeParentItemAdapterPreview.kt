@@ -14,6 +14,7 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.findViewTreeLifecycleOwner
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import androidx.viewpager2.widget.ViewPager2
@@ -42,6 +43,7 @@ import com.lagradost.cloudstream3.ui.result.FOCUS_SELF
 import com.lagradost.cloudstream3.ui.result.ResultFragment.bindLogo
 import com.lagradost.cloudstream3.ui.result.ResultViewModel2
 import com.lagradost.cloudstream3.ui.result.START_ACTION_RESUME_LATEST
+import com.lagradost.cloudstream3.ui.result.attachNestedHorizontalTouchListener
 import com.lagradost.cloudstream3.ui.result.getId
 import com.lagradost.cloudstream3.ui.result.setLinearListLayout
 import com.lagradost.cloudstream3.ui.search.SEARCH_ACTION_LOAD
@@ -511,19 +513,41 @@ class HomeParentItemAdapterPreview(
             previewViewpager.setPageTransformer(HomeScrollTransformer())
 
             previewViewpager.adapter = previewAdapter
+            resumeRecyclerView.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
             resumeRecyclerView.adapter = resumeAdapter
             bookmarkRecyclerView.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
             bookmarkRecyclerView.adapter = bookmarkAdapter
 
+            // İzlemeye devam et ve yer imleri için akıcı kaydırma, sabit boyut ve önbellek optimizasyonları
+            resumeRecyclerView.setHasFixedSize(true)
+            bookmarkRecyclerView.setHasFixedSize(true)
+            resumeRecyclerView.itemAnimator = null
+            bookmarkRecyclerView.itemAnimator = null
+            resumeRecyclerView.setItemViewCacheSize(10)
+            bookmarkRecyclerView.setItemViewCacheSize(10)
+            resumeRecyclerView.attachNestedHorizontalTouchListener()
+            bookmarkRecyclerView.attachNestedHorizontalTouchListener()
+
             resumeRecyclerView.setLinearListLayout(
                 nextLeft = R.id.nav_rail_view,
-                nextRight = FOCUS_SELF
+                nextRight = FOCUS_SELF,
+                coalesceTvScroll = true,
             )
 
             bookmarkRecyclerView.setLinearListLayout(
                 nextLeft = R.id.nav_rail_view,
-                nextRight = FOCUS_SELF
+                nextRight = FOCUS_SELF,
+                coalesceTvScroll = true,
             )
+
+            (resumeRecyclerView.layoutManager as? LinearLayoutManager)?.apply {
+                isItemPrefetchEnabled = true
+                initialPrefetchItemCount = 4
+            }
+            (bookmarkRecyclerView.layoutManager as? LinearLayoutManager)?.apply {
+                isItemPrefetchEnabled = true
+                initialPrefetchItemCount = 4
+            }
 
             fixPaddingStatusbarMargin(topPadding)
 

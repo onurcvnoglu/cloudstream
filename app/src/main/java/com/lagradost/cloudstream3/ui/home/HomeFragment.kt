@@ -755,10 +755,9 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
                 },
             )
             homeMasterRecycler.setRecycledViewPool(ParentItemAdapter.sharedPool)
-            if (isLayout(TV or EMULATOR)) {
-                homeMasterRecycler.itemAnimator = null
-                homeMasterRecycler.setItemViewCacheSize(6)
-            }
+            // Kategoriler arası dikey kaydırmada ve yeni kategori eklenişinde animatör kaynaklı takılmaları önle
+            homeMasterRecycler.itemAnimator = null
+            homeMasterRecycler.setItemViewCacheSize(6)
             homeMasterRecycler.adapter = homeMasterAdapter
 
             homeApiFab.isVisible = isLayout(PHONE)

@@ -60,6 +60,11 @@ class ResumeItemAdapter(
     override val footers = if (isLayout(TV or EMULATOR)) 1 else 0
 
     override fun onCreateFooter(parent: ViewGroup): ViewHolderState<Boolean> {
+        // Boyutların henüz hesaplanmadığı ilk yükleme anlarında gereksiz layout tetiklemelerini önle
+        if (minPosterSize <= 0 || maxPosterSize <= 0) {
+            updatePosterSize(parent.context)
+            updateCachedPosterSize()
+        }
         val expanded = parent.context.isBottomLayout()
         val inflater = LayoutInflater.from(parent.context)
         val binding = if (expanded) HomeRemoveGridExpandedBinding.inflate(
@@ -130,7 +135,7 @@ open class HomeChildItemAdapter(
             updateCachedPosterSize()
         }
 
-    private fun updateCachedPosterSize() {
+    protected fun updateCachedPosterSize() {
         setWidth = if (!isHorizontal) {
             minPosterSize
         } else {
@@ -185,6 +190,11 @@ open class HomeChildItemAdapter(
     }
 
     override fun onCreateContent(parent: ViewGroup): ViewHolderState<Boolean> {
+        // Boyutların henüz hesaplanmadığı ilk yükleme anlarında gereksiz layout tetiklemelerini önle
+        if (minPosterSize <= 0 || maxPosterSize <= 0) {
+            updatePosterSize(parent.context)
+            updateCachedPosterSize()
+        }
         val expanded = parent.context.isBottomLayout()
         val inflater = LayoutInflater.from(parent.context)
         val binding = if (expanded) HomeResultGridExpandedBinding.inflate(
