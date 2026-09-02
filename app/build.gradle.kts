@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.dokka)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlin.compose)
 }
 
 val javaTarget = JvmTarget.fromTarget(libs.versions.jvmTarget.get())
@@ -199,6 +200,7 @@ android {
     buildFeatures {
         buildConfig = true
         viewBinding = true
+        compose = true
     }
 
     packaging {
@@ -226,15 +228,26 @@ dependencies {
     // Android Core & Lifecycle
     implementation(libs.core.ktx)
     implementation(libs.activity.ktx)
+    implementation(libs.activity.compose)
     implementation(libs.annotation)
     implementation(libs.appcompat)
     implementation(libs.fragment.ktx)
     implementation(libs.bundles.lifecycle)
+    implementation(libs.lifecycle.runtime.compose)
+    implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.bundles.navigation)
+    implementation(libs.navigation.compose)
     implementation(libs.kotlinx.collections.immutable)
     implementation(libs.kotlinx.serialization.json) // JSON Parser
 
     // Design & UI
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.animation)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.runtime.livedata)
+    implementation(libs.compose.ui.tooling.preview)
+    implementation(libs.tv.material)
     implementation(libs.preference.ktx)
     implementation(libs.material)
     implementation(libs.mlkit.language.id)

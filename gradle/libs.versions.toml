@@ -3,6 +3,8 @@
 [versions]
 activityKtx = "1.13.0"
 androidGradlePlugin = "9.1.1"
+composeBom = "2026.01.00"
+composeCompiler = "2.4.0"
 animeDb = "1.0.2"
 annotation = "1.10.0"
 appcompat = "1.7.1"
@@ -69,15 +71,23 @@ versionName = "6.0.14"
 
 [libraries]
 activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "activityKtx" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityKtx" }
 anime-db = { module = "com.github.recloudstream:anime-db", version.ref = "animeDb" }
 annotation = { module = "androidx.annotation:annotation", version.ref = "annotation" }
 appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 biometric = { module = "androidx.biometric:biometric", version.ref = "biometric" }
 coil = { module = "io.coil-kt.coil3:coil", version.ref = "coil" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 colorpicker = { module = "com.github.recloudstream:color-picker-android", version.ref = "colorpicker" }
 conscrypt-android = { module = "org.conscrypt:conscrypt-android", version.ref = "conscryptAndroid" }
 constraintlayout = { module = "androidx.constraintlayout:constraintlayout", version.ref = "constraintlayout" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-animation = { module = "androidx.compose.animation:animation" }
+compose-foundation = { module = "androidx.compose.foundation:foundation" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-runtime-livedata = { module = "androidx.compose.runtime:runtime-livedata" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 core = { module = "androidx.test:core" }
 core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 cryptography-core = { module = "dev.whyoleg.cryptography:cryptography-core", version.ref = "cryptography" }
@@ -106,6 +116,8 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 ksoup = { module = "com.fleeksoft.ksoup:ksoup", version.ref = "ksoup" }
 ktor-http = { module = "io.ktor:ktor-http", version.ref = "ktor" }
 lifecycle-livedata-ktx = { module = "androidx.lifecycle:lifecycle-livedata-ktx", version.ref = "lifecycleKtx" }
+lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleKtx" }
+lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleKtx" }
 lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycleKtx" }
 material = { module = "com.google.android.material:material", version.ref = "material" }
 mlkit-language-id = { module = "com.google.mlkit:language-id", version.ref = "mlkitLanguageId" }
@@ -120,6 +132,7 @@ media3-exoplayer-dash = { module = "androidx.media3:media3-exoplayer-dash", vers
 media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls", version.ref = "media3" }
 media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
 media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
+navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationKtx" }
 navigation-fragment-ktx = { module = "androidx.navigation:navigation-fragment-ktx", version.ref = "navigationKtx" }
 navigation-ui-ktx = { module = "androidx.navigation:navigation-ui-ktx", version.ref = "navigationKtx" }
 newpipeextractor = { module = "com.github.teamnewpipe:NewPipeExtractor", version.ref = "newpipeextractor" }
@@ -135,6 +148,7 @@ rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }
 safefile = { module = "com.github.LagradOst:SafeFile", version.ref = "safefile" }
 shimmer = { module = "com.facebook.shimmer:shimmer", version.ref = "shimmer" }
 torrentserver = { module = "com.github.recloudstream:torrentserver", version.ref = "torrentserver" }
+tv-material = { module = "androidx.tv:tv-material", version = "1.1.0" }
 tvprovider = { module = "androidx.tvprovider:tvprovider", version.ref = "tvprovider" }
 video = { module = "com.google.android.mediahome:video", version.ref = "video" }
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
@@ -149,9 +163,10 @@ dokka = { id = "org.jetbrains.dokka", version.ref = "dokkaGradlePlugin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm" , version.ref = "kotlinGradlePlugin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlinGradlePlugin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinGradlePlugin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "composeCompiler" }
 
 [bundles]
-coil = ["coil", "coil-network-okhttp"]
+coil = ["coil", "coil-network-okhttp", "coil-compose"]
 cryptography = ["cryptography-core", "cryptography-provider-optimal"]
 lifecycle = ["lifecycle-livedata-ktx", "lifecycle-viewmodel-ktx"]
 media3 = ["media3-cast", "media3-common", "media3-container", "media3-datasource-cronet", "media3-datasource-okhttp", "media3-exoplayer", "media3-exoplayer-dash", "media3-exoplayer-hls", "media3-session", "media3-ui"]

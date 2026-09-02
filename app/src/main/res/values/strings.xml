@@ -390,6 +390,23 @@
     <string name="category_general">General</string>
     <string name="tv_layout_clock_settings">Show real time clock</string>
     <string name="tv_layout_clock_settings_des">Show a real time clock at the top of the screen. Applies to the homepage and player</string>
+    <string name="tv_compose_experience_title">Use the new TV interface</string>
+    <string name="tv_compose_experience_summary">Use the D-pad focused Compose TV shell. Turn off to return to the legacy TV interface.</string>
+    <string name="tv_no_home_content">No home content</string>
+    <string name="tv_refresh">Refresh</string>
+    <string name="tv_change_provider">Change provider</string>
+    <string name="tv_search_titles">Search titles…</string>
+    <string name="tv_clear">Clear</string>
+    <string name="tv_all">All</string>
+    <string name="tv_no_results">No results</string>
+    <string name="tv_recent_searches">Recent searches</string>
+    <string name="tv_empty_library">Your library is empty</string>
+    <string name="tv_play_resume">Play / Resume</string>
+    <string name="tv_more_like_this">More like this</string>
+    <string name="tv_audio">Audio</string>
+    <string name="tv_watched_count" formatted="true">%1$d watched</string>
+    <string name="tv_rating_format" formatted="true">★ %.1f</string>
+    <string name="tv_collapse">Collapse</string>
     <string name="random_button_settings">Random Button</string>
     <string name="random_button_settings_desc">Show random button on Homepage and Library</string>
     <string name="provider_lang_settings">Extension languages</string>

@@ -79,4 +79,3 @@ Bir içerik ilk kez açılırken, kullanıcının otomatik altyazı diline uygun
 
 ## Implementation Notes
 - Kaynak bağlı altyazı eşleşmesinde `nameSuffix` veya callback sırası kullanılmamalı; yalnızca mevcut nullable `SubtitleData.source` ilişkisi güvenilir kabul edilmeli.
-- AI kullanımı PR/issue açıklamasında repository `AI-POLICY.md` gereği belirtilmeli.

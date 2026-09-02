@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/tv_navigation"
+    app:startDestination="@id/tv_shell">
+
+    <fragment
+        android:id="@+id/tv_shell"
+        android:name="com.lagradost.cloudstream3.ui.tv.TvShellFragment"
+        android:label="@string/title_home" />
+</navigation>

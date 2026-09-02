@@ -96,6 +96,12 @@
                 android:defaultValue="false"
                 android:key="@string/tv_layout_clock_key" />
         <SwitchPreference
+                android:icon="@drawable/ic_baseline_tv_24"
+                android:summary="@string/tv_compose_experience_summary"
+                android:title="@string/tv_compose_experience_title"
+                android:defaultValue="false"
+                android:key="@string/tv_compose_experience_key" />
+        <SwitchPreference
             android:icon="@drawable/ic_baseline_play_arrow_24"
             android:summary="@string/random_button_settings_desc"
             android:title="@string/random_button_settings"

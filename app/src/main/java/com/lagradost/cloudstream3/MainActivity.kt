@@ -127,6 +127,8 @@ import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.ui.settings.Globals.updateTv
 import com.lagradost.cloudstream3.ui.settings.getCurrentLocale
 import com.lagradost.cloudstream3.ui.settings.SettingsGeneral
+import com.lagradost.cloudstream3.ui.tv.TvExperienceSettings
+import com.lagradost.cloudstream3.ui.tv.TvShellHost
 import com.lagradost.cloudstream3.ui.setup.HAS_DONE_SETUP_KEY
 import com.lagradost.cloudstream3.ui.setup.SetupFragmentExtensions
 import com.lagradost.cloudstream3.utils.ApkInstaller
@@ -198,7 +200,7 @@ import kotlin.math.absoluteValue
 import kotlin.reflect.full.createInstance
 import kotlin.system.exitProcess
 
-class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCallback {
+class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCallback, TvShellHost {
     companion object {
         var activityResultLauncher: ActivityResultLauncher<Intent>? = null
 
@@ -515,6 +517,23 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
 
     private fun updateNavBar(destination: NavDestination) {
         this.hideKeyboard()
+
+        if (isTvComposeExperienceEnabled()) {
+            val isComposeRoot = destination.id in setOf(
+                R.id.navigation_home,
+                R.id.navigation_search,
+                R.id.navigation_library,
+            )
+            if (tvLegacyBridgeActive && destination.id == R.id.navigation_home) {
+                tvLegacyBridgeActive = false
+            }
+            val showLegacyBridge = tvLegacyBridgeActive || !isComposeRoot
+            findViewById<View?>(R.id.tv_nav_host_fragment)?.isVisible = !showLegacyBridge
+            binding?.navHostFragment?.isVisible = showLegacyBridge
+            binding?.navRailView?.isGone = true
+            binding?.navView?.isGone = true
+            return
+        }
 
         // Fucks up anime info layout since that has its own layout
         binding?.castMiniControllerHolder?.isVisible =
@@ -937,6 +956,54 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
     }
 
     var binding: ActivityMainBinding? = null
+    private var tvLegacyBridgeActive = false
+
+    private fun isTvComposeExperienceEnabled(): Boolean =
+        isLayout(TV or EMULATOR) && TvExperienceSettings.isEnabled(this)
+
+    override fun openTvLegacyDestination(destination: String) {
+        if (!isTvComposeExperienceEnabled()) return
+        tvLegacyBridgeActive = true
+        findViewById<View?>(R.id.tv_nav_host_fragment)?.isGone = true
+        binding?.navHostFragment?.isVisible = true
+        binding?.navRailView?.isGone = true
+        binding?.navView?.isGone = true
+
+        val destinationId = when (destination) {
+            "downloads" -> R.id.navigation_downloads
+            "settings" -> R.id.navigation_settings
+            else -> return
+        }
+        val navHost = supportFragmentManager.findFragmentById(R.id.nav_host_fragment)
+            as? NavHostFragment ?: return
+        try {
+            navHost.navController.navigate(destinationId)
+        } catch (t: Throwable) {
+            logError(t)
+        }
+    }
+
+    override fun openTvResult(url: String, apiName: String) {
+        if (!isTvComposeExperienceEnabled()) return
+        tvLegacyBridgeActive = true
+        findViewById<View?>(R.id.tv_nav_host_fragment)?.isGone = true
+        binding?.navHostFragment?.isVisible = true
+        binding?.navRailView?.isGone = true
+        binding?.navView?.isGone = true
+        val navHost = supportFragmentManager.findFragmentById(R.id.nav_host_fragment)
+            as? NavHostFragment ?: return
+        try {
+            navHost.navController.navigate(
+                R.id.global_to_navigation_results_tv,
+                Bundle().apply {
+                    putString("url", url)
+                    putString("apiName", apiName)
+                },
+            )
+        } catch (t: Throwable) {
+            logError(t)
+        }
+    }
 
     object TvFocus {
         data class FocusTarget(
@@ -1300,6 +1367,19 @@ class MainActivity : AppCompatActivity(), ColorPickerDialogListener, BiometricCa
         } catch (t: Throwable) {
             showToast(txt(R.string.unable_to_inflate, t.message ?: ""), Toast.LENGTH_LONG)
             null
+        }
+
+        if (isTvComposeExperienceEnabled()) {
+            if (savedInstanceState == null) {
+                val tvNavHost = NavHostFragment.create(R.navigation.tv_navigation)
+                supportFragmentManager.beginTransaction()
+                    .replace(R.id.tv_nav_host_fragment, tvNavHost)
+                    .commitNow()
+            }
+            findViewById<View?>(R.id.tv_nav_host_fragment)?.isVisible = true
+            binding?.navHostFragment?.isGone = true
+            binding?.navRailView?.isGone = true
+            binding?.navView?.isGone = true
         }
 
         binding?.apply {
