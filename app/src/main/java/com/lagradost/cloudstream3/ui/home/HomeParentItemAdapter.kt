@@ -3,6 +3,7 @@ package com.lagradost.cloudstream3.ui.home
 import android.os.Build
 import android.os.Bundle
 import android.os.Parcelable
+import android.util.DisplayMetrics
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -10,6 +11,7 @@ import androidx.core.view.doOnAttach
 import androidx.core.view.doOnLayout
 import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import com.lagradost.cloudstream3.LoadResponse
@@ -32,6 +34,7 @@ import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRecyclerScrollable
+import kotlin.math.abs
 
 class LoadClickCallback(
     val action: Int = 0,
@@ -271,20 +274,80 @@ open class ParentItemAdapter(
             }
         } ?: return false
 
+        val targetAdapterPosition = HomeFocusRestorePlanner.adapterPosition(nextIndex, headers)
         val generation = ++categoryFocusGeneration
-        parentRecyclerView.scrollToPosition(HomeFocusRestorePlanner.adapterPosition(nextIndex, headers))
+
+        // Dikey kumanda geçişinde odaklanılacak en uygun yatay kartı belirlemek için
+        // mevcut kartın ekran üzerindeki X merkez koordinatını hesapla
+        val currentChildRecycler = (holder.binding as? HomepageParentBinding)?.homeChildRecyclerview
+        val currentFocusedCard = currentChildRecycler?.findFocus()
+        val currentCenterX = currentFocusedCard?.let { card ->
+            val loc = IntArray(2)
+            card.getLocationInWindow(loc)
+            loc[0] + card.width / 2
+        }
+
+        fun findBestCardInRecycler(targetRecycler: RecyclerView): View? {
+            if (targetRecycler.childCount == 0) return null
+            if (currentCenterX == null) {
+                return targetRecycler.findViewHolderForAdapterPosition(0)?.itemView
+                    ?: targetRecycler.getChildAt(0)
+            }
+            var bestChild: View? = null
+            var minDiff = Int.MAX_VALUE
+            for (i in 0 until targetRecycler.childCount) {
+                val child = targetRecycler.getChildAt(i)
+                if (child.isFocusable) {
+                    val loc = IntArray(2)
+                    child.getLocationInWindow(loc)
+                    val childCenterX = loc[0] + child.width / 2
+                    val diff = abs(childCenterX - currentCenterX)
+                    if (diff < minDiff) {
+                        minDiff = diff
+                        bestChild = child
+                    }
+                }
+            }
+            return bestChild ?: targetRecycler.findViewHolderForAdapterPosition(0)?.itemView
+            ?: targetRecycler.getChildAt(0)
+        }
+
+        val nextHolder = parentRecyclerView.findViewHolderForAdapterPosition(targetAdapterPosition) as? ParentItemHolder
+        if (nextHolder != null) {
+            val childRecyclerView = (nextHolder.binding as? HomepageParentBinding)?.homeChildRecyclerview
+            if (childRecyclerView != null) {
+                val bestCard = findBestCardInRecycler(childRecyclerView)
+                // Hedef kart doğrudan bulunursa odağı aktar; MainActivity.centerView dikey kaydırmayı tek ve akıcı hamlede yapacaktır
+                if (bestCard != null && (bestCard.hasFocus() || bestCard.requestFocus())) {
+                    return true
+                }
+            }
+        }
+
+        // Hedef kategori henüz ekranda değilse sert sıçrama (scrollToPosition) yerine dikey akıcı kaydırma başlatılır
+        val verticalScroller = object : LinearSmoothScroller(parentRecyclerView.context) {
+            override fun getVerticalSnapPreference(): Int = SNAP_TO_ANY
+            override fun calculateTimeForScrolling(dx: Int): Int = minOf(240, super.calculateTimeForScrolling(dx))
+            override fun calculateSpeedPerPixel(displayMetrics: DisplayMetrics): Float = 25f / displayMetrics.densityDpi
+        }
+        verticalScroller.targetPosition = targetAdapterPosition
+        parentRecyclerView.layoutManager?.startSmoothScroll(verticalScroller)
+
         parentRecyclerView.doOnNextLayout {
             if (generation != categoryFocusGeneration) return@doOnNextLayout
-            val nextHolder = parentRecyclerView.findViewHolderForAdapterPosition(
-                HomeFocusRestorePlanner.adapterPosition(nextIndex, headers)
-            ) as? ParentItemHolder ?: return@doOnNextLayout
-            val childRecyclerView = (nextHolder.binding as? HomepageParentBinding)
-                ?.homeChildRecyclerview ?: return@doOnNextLayout
-            childRecyclerView.scrollToPosition(0)
-            childRecyclerView.doOnNextLayout {
-                if (generation != categoryFocusGeneration) return@doOnNextLayout
-                childRecyclerView.findViewHolderForAdapterPosition(0)
-                    ?.itemView?.requestFocus()
+            val loadedHolder = parentRecyclerView.findViewHolderForAdapterPosition(targetAdapterPosition) as? ParentItemHolder
+                ?: return@doOnNextLayout
+            val childRecyclerView = (loadedHolder.binding as? HomepageParentBinding)?.homeChildRecyclerview
+                ?: return@doOnNextLayout
+
+            val bestCard = findBestCardInRecycler(childRecyclerView)
+            if (bestCard != null) {
+                bestCard.requestFocus()
+            } else {
+                childRecyclerView.doOnNextLayout {
+                    if (generation != categoryFocusGeneration) return@doOnNextLayout
+                    findBestCardInRecycler(childRecyclerView)?.requestFocus()
+                }
             }
         }
         return true
@@ -393,7 +456,11 @@ open class ParentItemAdapter(
         }
 
         val holder = ParentItemHolder(binding)
+        // Odaklanan kartın 1.08x büyütme animasyonunun kenarlardan kırpılmasını engelle
+        (binding.root as? ViewGroup)?.clipChildren = false
         val childRecyclerView = binding.homeChildRecyclerview
+        childRecyclerView.clipChildren = false
+        childRecyclerView.clipToPadding = false
         childRecyclerView.setRecycledViewPool(HomeChildItemAdapter.sharedPool)
         // Kart boyutları sabit olduğundan ebeveyn hiyerarşisinin gereksiz layout hesaplamasını engelle
         childRecyclerView.setHasFixedSize(true)

@@ -29,6 +29,8 @@ import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
+import com.lagradost.cloudstream3.utils.UIHelper.applyTvCardFocusAnimation
+import com.lagradost.cloudstream3.utils.UIHelper.resetTvCardFocus
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
 import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
 import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager
@@ -98,6 +100,7 @@ class EpisodeAdapter(
     }
 
     override fun onClearView(holder: ViewHolderState<Any>) {
+        holder.itemView.resetTvCardFocus()
         if (holder.itemView.hasFocus()) {
             holder.itemView.clearFocus()
         }
@@ -141,6 +144,7 @@ class EpisodeAdapter(
 
     override fun onBindContent(holder: ViewHolderState<Any>, item: ResultEpisode, position: Int) {
         val itemView = holder.itemView
+        itemView.resetTvCardFocus()
         when (val binding = holder.view) {
             is ResultEpisodeLargeBinding -> {
                 val setWidth =
@@ -358,10 +362,12 @@ class EpisodeAdapter(
                     clickCallback.invoke(EpisodeClickEvent(position, ACTION_CLICK_DEFAULT, item))
                 }
 
-                if (isLayout(TV)) {
+                if (isLayout(TV or EMULATOR)) {
                     itemView.isFocusable = true
                     itemView.isFocusableInTouchMode = true
-                    //itemView.touchscreenBlocksFocus = false
+                    itemView.setOnFocusChangeListener { view, hasFocus ->
+                        view.applyTvCardFocusAnimation(hasFocus, scale = 1.05f)
+                    }
                 }
 
                 itemView.setOnLongClickListener {
@@ -461,10 +467,12 @@ class EpisodeAdapter(
                         )
                     }
 
-                    if (isLayout(TV)) {
+                    if (isLayout(TV or EMULATOR)) {
                         itemView.isFocusable = true
                         itemView.isFocusableInTouchMode = true
-                        //itemView.touchscreenBlocksFocus = false
+                        itemView.setOnFocusChangeListener { view, hasFocus ->
+                            view.applyTvCardFocusAnimation(hasFocus, scale = 1.05f)
+                        }
                     }
 
                     itemView.setOnLongClickListener {

@@ -5,6 +5,7 @@ import android.util.DisplayMetrics
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.LinearSmoothScroller
@@ -138,14 +139,85 @@ open class LinearListLayout(context: Context?) :
                 findViewByPosition(position)?.takeIf { it.isFocusable }?.requestFocus()
             }
         }
-        // TV ve emülatörde henüz ekranda olmayan kart hizalanırken ani sıçramayı önlemek için ofsetli konumlandır
+        // TV ve emülatörde henüz ekranda olmayan kart hizalanırken ani sıçrama (snap) yerine
+        // hedef konuma doğru akıcı kaydırma başlatılır
         if (isLayout(TV or EMULATOR) && orientation == HORIZONTAL) {
-            val offset = if (isLayoutRTL) 0 else recyclerView.paddingLeft
-            scrollToPositionWithOffset(position, offset)
+            val scroller = createTvHorizontalSmoothScroller(recyclerView.context, position)
+            startSmoothScroll(scroller)
         } else {
             scrollToPosition(position)
         }
         return focused
+    }
+
+    /**
+     * TV ekranında yatay kartlar arasında gezinirken sert duruşları engelleyen
+     * ve yavaşlama eğrisiyle (DecelerateInterpolator) yağ gibi akan kaydırıcıyı üretir.
+     */
+    private fun createTvHorizontalSmoothScroller(
+        context: Context,
+        targetPos: Int
+    ): LinearSmoothScroller {
+        return object : LinearSmoothScroller(context) {
+            init {
+                targetPosition = targetPos
+            }
+
+            override fun calculateDxToMakeVisible(view: View, snapPreference: Int): Int {
+                val layoutManager = this@LinearListLayout
+                val left = layoutManager.getDecoratedLeft(view)
+                val right = layoutManager.getDecoratedRight(view)
+                val density = view.resources.displayMetrics.density
+                val leadMargin = (view.width * 0.75f).toInt().coerceAtLeast((60 * density).toInt())
+                val paddingThreshold = (12 * density).toInt()
+
+                return if (!isLayoutRTL) {
+                    val start = layoutManager.paddingLeft
+                    val end = layoutManager.width - layoutManager.paddingRight - leadMargin
+                    when {
+                        targetPosition == 0 -> start - left
+                        left < start + paddingThreshold -> start - left
+                        right > end -> end - right
+                        else -> 0
+                    }
+                } else {
+                    val start = layoutManager.width - layoutManager.paddingRight
+                    val end = layoutManager.paddingLeft + leadMargin
+                    when {
+                        targetPosition == 0 -> start - right
+                        right > start - paddingThreshold -> start - right
+                        left < end -> end - left
+                        else -> 0
+                    }
+                }
+            }
+
+            override fun calculateSpeedPerPixel(displayMetrics: DisplayMetrics): Float {
+                // Seri geçişlerde doğal ve akıcı kaydırma hızı (Android standart 25f)
+                return 25f / displayMetrics.densityDpi
+            }
+
+            override fun calculateTimeForDeceleration(dx: Int): Int {
+                // Pürüzsüz duruş için optimum süre aralığı (180ms - 260ms)
+                val baseTime = super.calculateTimeForDeceleration(dx)
+                return baseTime.coerceIn(180, 260)
+            }
+
+            override fun onTargetFound(targetView: View, state: RecyclerView.State, action: Action) {
+                val targetDx = calculateDxToMakeVisible(targetView, horizontalSnapPreference)
+                if (targetDx != 0) {
+                    val time = calculateTimeForDeceleration(abs(targetDx))
+                    action.update(-targetDx, 0, time, DecelerateInterpolator(1.5f))
+                }
+            }
+
+            override fun onStop() {
+                super.onStop()
+                if (activeTargetPosition == targetPosition) {
+                    activeTargetPosition = RecyclerView.NO_POSITION
+                }
+            }
+        }
     }
 
     /*
@@ -284,11 +356,36 @@ open class LinearListLayout(context: Context?) :
             val position = getPosition(child)
             if (position == RecyclerView.NO_POSITION) return false
 
-            val dx = when {
-                isLayoutRTL -> getDecoratedRight(child) - (parent.width - parent.paddingRight)
-                else -> getDecoratedLeft(child) - parent.paddingLeft
+            val density = child.resources.displayMetrics.density
+            val leadMargin = (child.width * 0.75f).toInt().coerceAtLeast((60 * density).toInt())
+            val paddingThreshold = (12 * density).toInt()
+
+            // Kartın halihazırda güvenli izleme alanında olup olmadığını hesapla
+            val dx = if (!isLayoutRTL) {
+                val start = parent.paddingLeft
+                val end = parent.width - parent.paddingRight - leadMargin
+                val left = getDecoratedLeft(child)
+                val right = getDecoratedRight(child)
+                when {
+                    position == 0 -> left - start
+                    left < start + paddingThreshold -> left - start
+                    right > end -> right - end
+                    else -> 0
+                }
+            } else {
+                val start = parent.width - parent.paddingRight
+                val end = parent.paddingLeft + leadMargin
+                val left = getDecoratedLeft(child)
+                val right = getDecoratedRight(child)
+                when {
+                    position == 0 -> right - start
+                    right > start - paddingThreshold -> right - start
+                    left < end -> left - end
+                    else -> 0
+                }
             }
 
+            // Kart zaten ekranda rahatça görünüyorsa listeyi gereksiz yere kaydırıp titreme yaratma
             if (dx == 0) {
                 activeTargetPosition = position
                 return false
@@ -299,14 +396,8 @@ open class LinearListLayout(context: Context?) :
                 if (parent.isComputingLayout) {
                     parent.post {
                         if (!parent.isComputingLayout) {
-                            val currentDx = when {
-                                isLayoutRTL -> getDecoratedRight(child) - (parent.width - parent.paddingRight)
-                                else -> getDecoratedLeft(child) - parent.paddingLeft
-                            }
-                            if (currentDx != 0) {
-                                parent.stopScroll()
-                                parent.scrollBy(currentDx, 0)
-                            }
+                            parent.stopScroll()
+                            parent.scrollBy(dx, 0)
                         }
                     }
                 } else {
@@ -323,30 +414,9 @@ open class LinearListLayout(context: Context?) :
 
             activeTargetPosition = position
 
-            // TV yatay kategorisinde seri D-pad basışlarında animasyonu kesip titremeye yol açan
-            // stopScroll() yerine, hedef konuma kesintisiz ve akıcı kayan LinearSmoothScroller kullanılır
-            val scroller = object : LinearSmoothScroller(parent.context) {
-                override fun getHorizontalSnapPreference(): Int =
-                    if (isLayoutRTL) SNAP_TO_END else SNAP_TO_START
-
-                override fun calculateSpeedPerPixel(displayMetrics: DisplayMetrics): Float {
-                    // Seri sağ/sol geçişlerinde gecikmeyi önleyen ve akıcılık sağlayan piksel başına hız
-                    return 14f / displayMetrics.densityDpi
-                }
-
-                override fun calculateTimeForScrolling(dx: Int): Int {
-                    // Hızlı geçişlerde kaydırmanın geride kalmasını önleyen üst süre sınırı (ms)
-                    return minOf(140, super.calculateTimeForScrolling(dx))
-                }
-
-                override fun onStop() {
-                    super.onStop()
-                    if (activeTargetPosition == targetPosition) {
-                        activeTargetPosition = RecyclerView.NO_POSITION
-                    }
-                }
-            }
-            scroller.targetPosition = position
+            // TV yatay kategorisinde her kartı başa çarpmak yerine,
+            // DecelerateInterpolator ve güvenli görünüm aralığıyla yağ gibi akan akıcı kaydırma uygulanır
+            val scroller = createTvHorizontalSmoothScroller(parent.context, position)
             startSmoothScroll(scroller)
             return true
         } else {

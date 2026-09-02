@@ -30,6 +30,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.MarginLayoutParams
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.view.animation.DecelerateInterpolator
 import android.widget.ListAdapter
 import android.widget.ListView
 import android.widget.Toast.LENGTH_LONG
@@ -92,6 +93,40 @@ object UIHelper {
     val Float.toPx: Float get() = (this * Resources.getSystem().displayMetrics.density)
     val Int.toDp: Int get() = (this / Resources.getSystem().displayMetrics.density).toInt()
     val Float.toDp: Float get() = (this / Resources.getSystem().displayMetrics.density)
+
+    /**
+     * TV ve emülatörde kumanda ile gezinirken kartların donuk kalmasını önler;
+     * odaklanılan kartı pürüzsüzce büyüterek ve Z ekseninde yükselterek akıcı (yağ gibi) bir odak animasyonu sağlar.
+     */
+    fun View.applyTvCardFocusAnimation(
+        hasFocus: Boolean,
+        scale: Float = 1.08f,
+        elevationDp: Float = 8f,
+        durationMs: Long = 180L,
+    ) {
+        val targetScale = if (hasFocus) scale else 1.0f
+        val targetTranslationZ = if (hasFocus) elevationDp.toPx else 0f
+
+        // Devam eden animasyon varsa iptal ederek yeni hedefe yumuşak bir yavaşlama eğrisiyle geçiş yap
+        animate()
+            .scaleX(targetScale)
+            .scaleY(targetScale)
+            .translationZ(targetTranslationZ)
+            .setDuration(durationMs)
+            .setInterpolator(DecelerateInterpolator(1.5f))
+            .start()
+    }
+
+    /**
+     * View geri dönüştürüldüğünde veya yeniden bağlandığında önceki animasyon kalıntılarını temizler
+     * ve kartı varsayılan boyut ve katman seviyesine sıfırlar.
+     */
+    fun View.resetTvCardFocus() {
+        animate().cancel()
+        scaleX = 1.0f
+        scaleY = 1.0f
+        translationZ = 0f
+    }
 
     fun Context.checkWrite(): Boolean {
         return (ContextCompat.checkSelfPermission(

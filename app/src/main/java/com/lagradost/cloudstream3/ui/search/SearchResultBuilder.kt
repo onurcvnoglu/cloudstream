@@ -19,6 +19,7 @@ import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.isMovieType
 import com.lagradost.cloudstream3.syncproviders.SyncAPI
+import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
 import com.lagradost.cloudstream3.utils.AppContextUtils.getNameFull
@@ -27,6 +28,7 @@ import com.lagradost.cloudstream3.utils.DataStoreHelper
 import com.lagradost.cloudstream3.utils.DataStoreHelper.fixVisual
 import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.cloudstream3.utils.SubtitleHelper
+import com.lagradost.cloudstream3.utils.UIHelper.applyTvCardFocusAnimation
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
 import com.lagradost.cloudstream3.utils.getImageFromDrawable
 
@@ -224,26 +226,21 @@ object SearchResultBuilder {
 
         */
 
-        if (isLayout(TV)) {
-            // bg.isFocusable = true
-            // bg.isFocusableInTouchMode = true
-            // bg.touchscreenBlocksFocus = false
+        if (isLayout(TV or EMULATOR)) {
             itemView.isFocusableInTouchMode = true
             itemView.isFocusable = true
         }
-
-        /**/
 
         itemView.setOnLongClickListener {
             longClick(it)
             return@setOnLongClickListener true
         }
 
-        /*bg.setOnFocusChangeListener { view, b ->
-            focus(view, b)
-        }*/
-
         itemView.setOnFocusChangeListener { view, b ->
+            // Kumanda ve klavye geçişlerinde kartın donuk kalmasını engellemek için akıcı odak ve derinlik animasyonu uygula
+            if (isLayout(TV or EMULATOR)) {
+                view.applyTvCardFocusAnimation(b)
+            }
             focus(view, b)
         }
 

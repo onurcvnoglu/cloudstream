@@ -23,6 +23,7 @@ import androidx.core.view.isInvisible
 import androidx.core.view.isVisible
 import androidx.fragment.app.activityViewModels
 import androidx.preference.PreferenceManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.lagradost.cloudstream3.plugins.PluginManager
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
@@ -758,6 +759,13 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             // Kategoriler arası dikey kaydırmada ve yeni kategori eklenişinde animatör kaynaklı takılmaları önle
             homeMasterRecycler.itemAnimator = null
             homeMasterRecycler.setItemViewCacheSize(6)
+            // Odaklanan kart animasyonlarının ana listede kırpılmasını önle ve komşu kategorileri önceden yükle
+            homeMasterRecycler.clipChildren = false
+            homeMasterRecycler.clipToPadding = false
+            (homeMasterRecycler.layoutManager as? LinearLayoutManager)?.apply {
+                isItemPrefetchEnabled = true
+                initialPrefetchItemCount = 4
+            }
             homeMasterRecycler.adapter = homeMasterAdapter
 
             homeApiFab.isVisible = isLayout(PHONE)

@@ -26,7 +26,9 @@ import com.lagradost.cloudstream3.ui.search.SearchResultBuilder
 import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
 import com.lagradost.cloudstream3.ui.settings.Globals.TV
 import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
+import com.lagradost.cloudstream3.utils.UIHelper.applyTvCardFocusAnimation
 import com.lagradost.cloudstream3.utils.UIHelper.isBottomLayout
+import com.lagradost.cloudstream3.utils.UIHelper.resetTvCardFocus
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
 
 class HomeScrollViewHolderState(view: ViewBinding) : ViewHolderState<Boolean>(view) {
@@ -76,11 +78,14 @@ class ResumeItemAdapter(
     }
 
     override fun onClearView(holder: ViewHolderState<Boolean>) {
+        // Kart geri dönüştürülürken odak animasyonunu temizle
+        holder.itemView.resetTvCardFocus()
         // Clear the image, idk if this saves ram or not, but I guess?
         clearImage(holder.view.root.findViewById(R.id.imageView))
     }
 
     override fun onBindFooter(holder: ViewHolderState<Boolean>) {
+        holder.itemView.resetTvCardFocus()
         this.applyBinding(holder, false)
         when (val binding = holder.view) {
             is HomeRemoveGridBinding -> {
@@ -92,9 +97,13 @@ class ResumeItemAdapter(
             }
         }
         holder.itemView.apply {
-            if (isLayout(TV)) {
+            if (isLayout(TV or EMULATOR)) {
                 isFocusableInTouchMode = true
                 isFocusable = true
+                setOnFocusChangeListener { view, hasFocus ->
+                    // Geçmişi temizle butonuna da aynı akıcı odak animasyonunu uygula
+                    view.applyTvCardFocusAnimation(hasFocus)
+                }
             }
             nextFocusUp?.let {
                 nextFocusUpId = it
@@ -250,11 +259,19 @@ open class HomeChildItemAdapter(
         }
     }
 
+    override fun onClearView(holder: ViewHolderState<Boolean>) {
+        // Kart geri dönüştürülürken animasyon artıklarını sıfırla
+        holder.itemView.resetTvCardFocus()
+        super.onClearView(holder)
+    }
+
     override fun onBindContent(
         holder: ViewHolderState<Boolean>,
         item: SearchResponse,
         position: Int
     ) {
+        // Yeniden bağlanan kartın önceki odak animasyonu durumundan arındırılmasını sağla
+        holder.itemView.resetTvCardFocus()
         applyBinding(holder, position == 0)
         (holder as? HomeScrollViewHolderState)?.apply {
             // Recycled holders must not carry a previous category's transient focus state.

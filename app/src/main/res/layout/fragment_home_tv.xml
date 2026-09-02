@@ -157,6 +157,8 @@
         android:id="@+id/home_master_recycler"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:descendantFocusability="afterDescendants"
         android:nextFocusLeft="@id/navigation_home"
         android:nextFocusUp="@id/home_bookmarked_child_recyclerview"
