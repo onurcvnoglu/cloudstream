@@ -1,14 +1,11 @@
 package com.lagradost.cloudstream3.ui.result
 
 import android.content.Context
-import android.util.DisplayMetrics
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.animation.DecelerateInterpolator
 import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.CommonActivity.activity
@@ -101,7 +98,9 @@ open class LinearListLayout(context: Context?) :
 
     private var pendingFocusPosition = RecyclerView.NO_POSITION
     var coalesceTvScroll: Boolean = false
-    private var activeTargetPosition = RecyclerView.NO_POSITION
+    private var pendingHorizontalScroll = 0
+    private var horizontalScrollPosted = false
+    private var horizontalScrollParent: RecyclerView? = null
 
     fun setHorizontal() {
         orientation = HORIZONTAL
@@ -139,85 +138,15 @@ open class LinearListLayout(context: Context?) :
                 findViewByPosition(position)?.takeIf { it.isFocusable }?.requestFocus()
             }
         }
-        // TV ve emülatörde henüz ekranda olmayan kart hizalanırken ani sıçrama (snap) yerine
-        // hedef konuma doğru akıcı kaydırma başlatılır
+        // TV ve emülatörde henüz ekranda olmayan kart hizalanırken bir sonraki layout döngüsünde
+        // görünümün kesin olarak üretilmesi ve odak kaybı/geri atma yaşanmaması için anında konumlandır
         if (isLayout(TV or EMULATOR) && orientation == HORIZONTAL) {
-            val scroller = createTvHorizontalSmoothScroller(recyclerView.context, position)
-            startSmoothScroll(scroller)
+            val offset = if (isLayoutRTL) 0 else recyclerView.paddingLeft
+            scrollToPositionWithOffset(position, offset)
         } else {
             scrollToPosition(position)
         }
         return focused
-    }
-
-    /**
-     * TV ekranında yatay kartlar arasında gezinirken sert duruşları engelleyen
-     * ve yavaşlama eğrisiyle (DecelerateInterpolator) yağ gibi akan kaydırıcıyı üretir.
-     */
-    private fun createTvHorizontalSmoothScroller(
-        context: Context,
-        targetPos: Int
-    ): LinearSmoothScroller {
-        return object : LinearSmoothScroller(context) {
-            init {
-                targetPosition = targetPos
-            }
-
-            override fun calculateDxToMakeVisible(view: View, snapPreference: Int): Int {
-                val layoutManager = this@LinearListLayout
-                val left = layoutManager.getDecoratedLeft(view)
-                val right = layoutManager.getDecoratedRight(view)
-                val density = view.resources.displayMetrics.density
-                val leadMargin = (view.width * 0.75f).toInt().coerceAtLeast((60 * density).toInt())
-                val paddingThreshold = (12 * density).toInt()
-
-                return if (!isLayoutRTL) {
-                    val start = layoutManager.paddingLeft
-                    val end = layoutManager.width - layoutManager.paddingRight - leadMargin
-                    when {
-                        targetPosition == 0 -> start - left
-                        left < start + paddingThreshold -> start - left
-                        right > end -> end - right
-                        else -> 0
-                    }
-                } else {
-                    val start = layoutManager.width - layoutManager.paddingRight
-                    val end = layoutManager.paddingLeft + leadMargin
-                    when {
-                        targetPosition == 0 -> start - right
-                        right > start - paddingThreshold -> start - right
-                        left < end -> end - left
-                        else -> 0
-                    }
-                }
-            }
-
-            override fun calculateSpeedPerPixel(displayMetrics: DisplayMetrics): Float {
-                // Seri geçişlerde doğal ve akıcı kaydırma hızı (Android standart 25f)
-                return 25f / displayMetrics.densityDpi
-            }
-
-            override fun calculateTimeForDeceleration(dx: Int): Int {
-                // Pürüzsüz duruş için optimum süre aralığı (180ms - 260ms)
-                val baseTime = super.calculateTimeForDeceleration(dx)
-                return baseTime.coerceIn(180, 260)
-            }
-
-            override fun onTargetFound(targetView: View, state: RecyclerView.State, action: Action) {
-                val targetDx = calculateDxToMakeVisible(targetView, horizontalSnapPreference)
-                if (targetDx != 0) {
-                    val time = calculateTimeForDeceleration(abs(targetDx))
-                    action.update(-targetDx, 0, time, DecelerateInterpolator(1.5f))
-                }
-            }
-
-            override fun onStop() {
-                super.onStop()
-                if (activeTargetPosition == targetPosition) {
-                    activeTargetPosition = RecyclerView.NO_POSITION
-                }
-            }
-        }
     }
 
     /*
@@ -385,14 +314,25 @@ open class LinearListLayout(context: Context?) :
                 }
             }
 
-            // Kart zaten ekranda rahatça görünüyorsa listeyi gereksiz yere kaydırıp titreme yaratma
+            // Dikey ebeveyn listeye (homeMasterRecycler) odak dikdörtgenini ileterek
+            // MainActivity.centerView dikey merkezleme çağrısının üst RecyclerView tarafından
+            // algılanıp dikeyde akıcı olarak ortalanmasını sağla
+            val parentConsumed = try {
+                if (parent.parent is android.view.ViewParent) {
+                    val parentRect = android.graphics.Rect(rect)
+                    parentRect.offset(child.left, child.top)
+                    parent.parent.requestChildRectangleOnScreen(parent, parentRect, immediate)
+                } else false
+            } catch (_: Throwable) {
+                false
+            }
+
+            // Kart zaten ekranda rahatça görünüyorsa listeyi yatayda gereksiz yere kaydırıp titreme yaratma
             if (dx == 0) {
-                activeTargetPosition = position
-                return false
+                return parentConsumed
             }
 
             if (immediate) {
-                activeTargetPosition = position
                 if (parent.isComputingLayout) {
                     parent.post {
                         if (!parent.isComputingLayout) {
@@ -407,17 +347,25 @@ open class LinearListLayout(context: Context?) :
                 return true
             }
 
-            // Halihazırda bu karta doğru akıcı kaydırma devam ediyorsa animasyonu kesip sıfırdan başlatma
-            if (isSmoothScrolling && activeTargetPosition == position) {
-                return true
+            // TV yatay kategorisinde hızlı kumanda basışlarında animasyonları birleştir (coalesce)
+            // ve yerel akıcı kaydırma ile pürüzsüz geçiş sağla
+            if (coalesceTvScroll) {
+                pendingHorizontalScroll = dx
+                horizontalScrollParent = parent
+                parent.stopScroll()
+                if (!horizontalScrollPosted) {
+                    horizontalScrollPosted = true
+                    parent.postOnAnimation {
+                        horizontalScrollPosted = false
+                        val scrollParent = horizontalScrollParent ?: return@postOnAnimation
+                        val pendingScroll = pendingHorizontalScroll
+                        pendingHorizontalScroll = 0
+                        if (pendingScroll != 0) scrollParent.smoothScrollBy(pendingScroll, 0)
+                    }
+                }
+            } else {
+                parent.smoothScrollBy(dx, 0)
             }
-
-            activeTargetPosition = position
-
-            // TV yatay kategorisinde her kartı başa çarpmak yerine,
-            // DecelerateInterpolator ve güvenli görünüm aralığıyla yağ gibi akan akıcı kaydırma uygulanır
-            val scroller = createTvHorizontalSmoothScroller(parent.context, position)
-            startSmoothScroll(scroller)
             return true
         } else {
             return super.requestChildRectangleOnScreen(

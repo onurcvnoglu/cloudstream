@@ -22,6 +22,7 @@ enum class CSPlayerEvent(val value: Int) {
     ToggleMute(8),
     Restart(9),
     PlayAsAudio(10),
+    ToggleSkipSilence(11),
 }
 
 enum class CSPlayerLoading {
@@ -217,7 +218,11 @@ interface IPlayer {
     fun getPosition(): Long?
 
     fun seekTime(time: Long, source: PlayerEventSource = PlayerEventSource.UI)
-    fun seekTo(time: Long, source: PlayerEventSource = PlayerEventSource.UI)
+    fun seekTo(time: Long, source: PlayerEventSource = PlayerEventSource.UI, exact: Boolean = false)
+
+    /** Skip silent parts of audio automatically */
+    fun setSkipSilence(enabled: Boolean) {}
+    fun getSkipSilence(): Boolean = false
 
     fun getSubtitleOffset(): Long // in ms
     fun setSubtitleOffset(offset: Long) // in ms

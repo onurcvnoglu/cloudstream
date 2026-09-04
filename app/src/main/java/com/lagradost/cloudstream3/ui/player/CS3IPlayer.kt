@@ -17,6 +17,7 @@ import androidx.annotation.MainThread
 import androidx.annotation.OptIn
 import androidx.appcompat.app.AlertDialog
 import androidx.core.net.toUri
+import androidx.media3.common.C
 import androidx.media3.common.C.TIME_UNSET
 import androidx.media3.common.C.TRACK_TYPE_AUDIO
 import androidx.media3.common.C.TRACK_TYPE_TEXT
@@ -51,6 +52,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer.STATE_ENABLED
 import androidx.media3.exoplayer.Renderer.STATE_STARTED
 import androidx.media3.exoplayer.SeekParameters
+import androidx.media3.exoplayer.upstream.BandwidthMeter
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
@@ -124,19 +128,27 @@ const val TAG = "CS3ExoPlayer"
 const val PREFERRED_AUDIO_LANGUAGE_KEY = "preferred_audio_language"
 
 /** toleranceBeforeUs – The maximum time that the actual position seeked to may precede the
- * requested seek position, in microseconds. Must be non-negative. */
-const val toleranceBeforeUs = 300_000L
+ * requested seek position, in microseconds. Must be non-negative.
+ * Set to 1.0s to allow snapping to keyframes for fast, smooth seeking. */
+const val toleranceBeforeUs = 1_000_000L
 
 /**
  * toleranceAfterUs – The maximum time that the actual position seeked to may exceed the requested
  * seek position, in microseconds. Must be non-negative.
+ * Set to 1.0s to allow snapping to keyframes for fast, smooth seeking.
  */
-const val toleranceAfterUs = 300_000L
+const val toleranceAfterUs = 1_000_000L
 
 @OptIn(UnstableApi::class)
 class CS3IPlayer : IPlayer {
     private var playerListener: Player.Listener? = null
     private var isPlaying = false
+    private var skipSilence = false
+    override fun setSkipSilence(enabled: Boolean) {
+        skipSilence = enabled
+        exoPlayer?.skipSilenceEnabled = enabled
+    }
+    override fun getSkipSilence(): Boolean = exoPlayer?.skipSilenceEnabled ?: skipSilence
     private var exoPlayer: ExoPlayer? = null
         set(value) {
             // If the old value is not null then the player has not been properly released.
@@ -732,6 +744,30 @@ class CS3IPlayer : IPlayer {
             }
 
         private var simpleCache: SimpleCache? = null
+        private const val DEFAULT_DISK_CACHE_SIZE = 100L * 1024L * 1024L // 100 MB
+        private const val DEFAULT_CRONET_DISK_CACHE_SIZE = 50L * 1024L * 1024L // 50 MB
+
+        @Volatile
+        private var sharedBandwidthMeter: DefaultBandwidthMeter? = null
+
+        fun getBandwidthMeter(context: Context): DefaultBandwidthMeter {
+            return sharedBandwidthMeter ?: synchronized(this) {
+                sharedBandwidthMeter ?: DefaultBandwidthMeter.Builder(context.applicationContext)
+                    .setResetOnNetworkTypeChange(true)
+                    .build().also {
+                        sharedBandwidthMeter = it
+                    }
+            }
+        }
+
+        private val cronetExecutor by lazy {
+            Executors.newFixedThreadPool(4) { runnable ->
+                Thread(runnable, "CloudStream-Cronet").apply {
+                    isDaemon = true
+                    priority = Thread.NORM_PRIORITY - 1
+                }
+            }
+        }
 
         /// Create a small factory for small things, no cache, no cronet
         private fun createOnlineSource(
@@ -762,17 +798,17 @@ class CS3IPlayer : IPlayer {
             // https://gist.github.com/ShivamKumarJha/3c8398b47053ae05112d2a8f8b5de531
             return try {
                 val cacheDirectory = File(context.cacheDir, "CronetEngine")
-                cacheDirectory.deleteRecursively()
                 if (!cacheDirectory.exists()) {
                     cacheDirectory.mkdirs()
                 }
+                val effectiveDiskCache = if (diskCacheSize <= 0) DEFAULT_CRONET_DISK_CACHE_SIZE else diskCacheSize
                 CronetEngine.Builder(context)
                     .enableBrotli(true)
                     .enableHttp2(true)
                     .enableQuic(true)
                     .setStoragePath(cacheDirectory.absolutePath)
                     .setLibraryLoader(null)
-                    .enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, diskCacheSize)
+                    .enableHttpCache(CronetEngine.Builder.HTTP_CACHE_DISK, effectiveDiskCache)
                     .build().also { buildEngine ->
                         Log.d(
                             TAG,
@@ -788,33 +824,40 @@ class CS3IPlayer : IPlayer {
         }
 
         private fun createVideoSource(
+            context: Context,
             link: ExtractorLink,
             engine: CronetEngine?,
             interceptor: Interceptor?,
         ): HttpDataSource.Factory {
+            val meter = getBandwidthMeter(context)
             val userAgent = link.headers.entries.find {
                 it.key.equals("User-Agent", ignoreCase = true)
             }?.value ?: USER_AGENT
 
             val source = if (interceptor == null) {
                 if (engine == null) {
-                    Log.d(TAG, "Using DefaultHttpDataSource for $link")
-                    OkHttpDataSource.Factory(app.baseClient).setUserAgent(userAgent)
+                    Log.d(TAG, "Using OkHttpDataSource for $link")
+                    OkHttpDataSource.Factory(app.baseClient)
+                        .setUserAgent(userAgent)
+                        .setTransferListener(meter)
                 } else {
                     Log.d(TAG, "Using CronetDataSource for $link")
-                    CronetDataSource.Factory(engine, Executors.newSingleThreadExecutor())
+                    CronetDataSource.Factory(engine, cronetExecutor)
                         .setUserAgent(userAgent)
                         .setConnectionTimeoutMs(CRONET_TIMEOUT_MS)
                         .setReadTimeoutMs(CRONET_TIMEOUT_MS)
                         .setResetTimeoutOnRedirects(true)
                         .setHandleSetCookieRequests(true)
+                        .setTransferListener(meter)
                 }
             } else {
-                Log.d(TAG, "Using OkHttpDataSource for $link")
+                Log.d(TAG, "Using OkHttpDataSource with interceptor for $link")
                 val client = app.baseClient.newBuilder()
                     .addInterceptor(interceptor)
                     .build()
-                OkHttpDataSource.Factory(client).setUserAgent(userAgent)
+                OkHttpDataSource.Factory(client)
+                    .setUserAgent(userAgent)
+                    .setTransferListener(meter)
             }
 
             // Do no include empty referer, if the provider wants those they can use the header map.
@@ -840,11 +883,12 @@ class CS3IPlayer : IPlayer {
         private fun getCache(context: Context, cacheSize: Long): SimpleCache? {
             return try {
                 val databaseProvider = StandaloneDatabaseProvider(context)
+                val effectiveCacheSize = if (cacheSize <= 0) DEFAULT_DISK_CACHE_SIZE else cacheSize
                 SimpleCache(
                     File(
                         context.cacheDir, "exoplayer"
                     ).also { deleteFileOnExit(it) }, // Ensures always fresh file
-                    LeastRecentlyUsedCacheEvictor(cacheSize),
+                    LeastRecentlyUsedCacheEvictor(effectiveCacheSize),
                     databaseProvider
                 )
             } catch (e: Exception) {
@@ -875,6 +919,12 @@ class CS3IPlayer : IPlayer {
                 // but will make the m3u8 pick the correct preferred
                 .setMaxVideoSize(Int.MAX_VALUE, maxVideoHeight ?: Int.MAX_VALUE)
                 .setPreferredAudioLanguage(null)
+                .setAllowVideoMixedMimeTypeAdaptiveness(true)
+                .setAllowVideoNonSeamlessAdaptiveness(true)
+                .setViewportSizeToPhysicalDisplaySize(context, true)
+                .setConstrainAudioChannelCountToDeviceCapabilities(true)
+                .setAllowAudioMixedMimeTypeAdaptiveness(true)
+                .setAllowAudioMixedSampleRateAdaptiveness(true)
                 .build()
             return trackSelector
         }
@@ -920,9 +970,14 @@ class CS3IPlayer : IPlayer {
         exoPlayer?.seekTime(time, source)
     }
 
-    override fun seekTo(time: Long, source: PlayerEventSource) {
+    override fun seekTo(time: Long, source: PlayerEventSource, exact: Boolean) {
         if (isMediaSeekable) {
             updatedTime(time, source)
+            if (exact) {
+                exoPlayer?.setSeekParameters(SeekParameters.EXACT)
+            } else {
+                exoPlayer?.setSeekParameters(SeekParameters(toleranceBeforeUs, toleranceAfterUs))
+            }
             exoPlayer?.seekTo(time)
         } else {
             Log.i(TAG, "Media is not seekable, we can not seek to $time")
@@ -1014,7 +1069,7 @@ class CS3IPlayer : IPlayer {
                             if (lastTimeStamp.skipToNextEpisode) {
                                 handleEvent(CSPlayerEvent.NextEpisode, source)
                             } else {
-                                seekTo(lastTimeStamp.timestamp.endMs + 1L)
+                                seekTo(lastTimeStamp.timestamp.endMs + 1L, source, exact = true)
                             }
                             event(TimestampSkippedEvent(timestamp = lastTimeStamp, source = source))
                         }
@@ -1023,6 +1078,10 @@ class CS3IPlayer : IPlayer {
                     CSPlayerEvent.PlayAsAudio -> {
                         isAudioOnlyBackground = true
                         activity?.moveTaskToBack(false)
+                    }
+
+                    CSPlayerEvent.ToggleSkipSilence -> {
+                        setSkipSilence(!getSkipSilence())
                     }
                 }
             }
@@ -1081,13 +1140,43 @@ class CS3IPlayer : IPlayer {
         /** External audio tracks to merge with the video */
         audioSources: List<MediaSource> = emptyList()
     ): ExoPlayer {
+        // Because "Java rules" the media3 team hates to do open classes so we have to copy paste the entire thing to add a custom extractor
+        // This includes the updated MKV extractor that enabled seeking in formats where the seek information is at the back of the file
+        val extractorFactor = UpdatedDefaultExtractorsFactory()
+            .setFragmentedMp4ExtractorFlags(FragmentedMp4Extractor.FLAG_MERGE_FRAGMENTED_SIDX)
+
+        // Create an online connection with cache for all online sources
+        val dataSourceFactory = if (onlineSource == null) {
+            null
+        } else {
+            if (simpleCache == null)
+                simpleCache = getCache(context, simpleCacheSize)
+
+            val cacheFactory = CacheDataSource.Factory().apply {
+                simpleCache?.let { setCache(it) }
+                setUpstreamDataSourceFactory(onlineSource)
+                setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+            }
+            cacheFactory
+        }
+
+        val defaultMediaSourceFactory = (if (dataSourceFactory != null) {
+            DefaultMediaSourceFactory(dataSourceFactory, extractorFactor)
+        } else {
+            DefaultMediaSourceFactory(context, extractorFactor)
+        }).apply {
+            setLiveTargetOffsetMs(PREFERRED_LIVE_OFFSET)
+            setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
+            setLoadOnlySelectedTracks(true)
+        }
+
+        val meter = getBandwidthMeter(context)
         val exoPlayerBuilder =
             ExoPlayer.Builder(context)
-                .setMediaSourceFactory(
-                    DefaultMediaSourceFactory(context).setLiveTargetOffsetMs(
-                        PREFERRED_LIVE_OFFSET
-                    )
-                )
+                .setBandwidthMeter(meter)
+                .setWakeMode(C.WAKE_MODE_NETWORK)
+                .setUseLazyPreparation(true)
+                .setMediaSourceFactory(defaultMediaSourceFactory)
                 .setLivePlaybackSpeedControl(
                     DefaultLivePlaybackSpeedControl.Builder()
                         .setFallbackMaxPlaybackSpeed(1.03f)
@@ -1112,6 +1201,8 @@ class CS3IPlayer : IPlayer {
                     val factory = if (isSoftwareDecodingEnabled) {
                         FixedNextRenderersFactory(context).apply {
                             setEnableDecoderFallback(true)
+                            setAllowedVideoJoiningTimeMs(3000)
+                            setEnableAudioTrackPlaybackParams(true)
                             setExtensionRendererMode(
                                 if (isSoftwareDecodingPreferred)
                                     DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
@@ -1121,14 +1212,24 @@ class CS3IPlayer : IPlayer {
                         }
                     } else {
                         // no nextlib = EXTENSION_RENDERER_MODE_OFF
-                        DefaultRenderersFactory(context)
+                        DefaultRenderersFactory(context).apply {
+                            setEnableDecoderFallback(true)
+                            setAllowedVideoJoiningTimeMs(3000)
+                            setEnableAudioTrackPlaybackParams(true)
+                        }
                     }
 
                     val style = CustomDecoder.style
                     // Custom TextOutput to apply cue styling and rules to all subtitles
                     val customTextOutput = TextOutput { cue ->
+                        val cues = cue.cues
+                        if (cues.isEmpty()) {
+                            subtitleHelper.subtitleView?.setCues(emptyList())
+                            return@TextOutput
+                        }
+
                         // Do not remove filterNotNull as Java typesystem is fucked
-                        val (bitmapCues, textCues) = cue.cues.toList()
+                        val (bitmapCues, textCues) = cues.toList()
                             .partition { it.bitmap != null }
 
                         val styledBitmapCues = bitmapCues.map { bitmapCue ->
@@ -1221,7 +1322,7 @@ class CS3IPlayer : IPlayer {
                         maxVideoHeight
                     )
                 )
-                // Allows any seeking to be +- 0.3s to allow for faster seeking
+                // Allows seeking to snap to keyframes for fast and responsive seeking
                 .setSeekParameters(SeekParameters(toleranceBeforeUs, toleranceAfterUs))
                 .setLoadControl(
                     DefaultLoadControl.Builder()
@@ -1236,42 +1337,18 @@ class CS3IPlayer : IPlayer {
                             30000,
                             true
                         )
+                        .setPrioritizeTimeOverSizeThresholds(true)
                         .setBufferDurationsMs(
-                            DefaultLoadControl.DEFAULT_MIN_BUFFER_MS,
+                            20_000,
                             if (videoBufferMs <= 0) {
-                                DefaultLoadControl.DEFAULT_MAX_BUFFER_MS
+                                50_000
                             } else {
-                                videoBufferMs.toInt()
+                                maxOf(20_000, videoBufferMs.toInt())
                             },
-                            DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_MS,
-                            DefaultLoadControl.DEFAULT_BUFFER_FOR_PLAYBACK_AFTER_REBUFFER_MS
+                            1_500,
+                            2_000
                         ).build()
                 )
-
-        // Because "Java rules" the media3 team hates to do open classes so we have to copy paste the entire thing to add a custom extractor
-        // This includes the updated MKV extractor that enabled seeking in formats where the seek information is at the back of the file
-        val extractorFactor = UpdatedDefaultExtractorsFactory()
-            .setFragmentedMp4ExtractorFlags(FragmentedMp4Extractor.FLAG_MERGE_FRAGMENTED_SIDX)
-
-        // Create an online connection with cache for all online sources
-        val dataSourceFactory = if (onlineSource == null) {
-            null
-        } else {
-            if (simpleCache == null)
-                simpleCache = getCache(context, simpleCacheSize)
-
-            val cacheFactory = CacheDataSource.Factory().apply {
-                simpleCache?.let { setCache(it) }
-                setUpstreamDataSourceFactory(onlineSource)
-            }
-            cacheFactory
-        }
-
-        val defaultMediaSourceFactory = if (dataSourceFactory != null) {
-            DefaultMediaSourceFactory(dataSourceFactory, extractorFactor)
-        } else {
-            DefaultMediaSourceFactory(context, extractorFactor)
-        }
 
         // If there is only one item then treat it as normal, if multiple: concatenate the items.
         val videoMediaSource = if (mediaItemSlices.size == 1) {
@@ -1296,6 +1373,7 @@ class CS3IPlayer : IPlayer {
                             .build(drmCallback)
 
                         DashMediaSource.Factory(client)
+                            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
                             .setDrmSessionManagerProvider { manager }
                             .createMediaSource(item.mediaItem)
                     }
@@ -1317,6 +1395,7 @@ class CS3IPlayer : IPlayer {
                             .build(drmCallback)
 
                         DashMediaSource.Factory(client)
+                            .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(3))
                             .setDrmSessionManagerProvider { manager }
                             .createMediaSource(item.mediaItem)
                     }
@@ -1372,6 +1451,7 @@ class CS3IPlayer : IPlayer {
             )
             setHandleAudioBecomingNoisy(true)
             setPlaybackSpeed(playBackSpeed)
+            skipSilenceEnabled = skipSilence
             this.addAnalyticsListener(tracksAnalyticsListener)
         }
     }
@@ -1942,6 +2022,7 @@ class CS3IPlayer : IPlayer {
 
             val onlineSourceFactory =
                 createVideoSource(
+                    context = context,
                     link = link,
                     engine = tryCreateEngine(context, simpleCacheSize),
                     interceptor = interceptor

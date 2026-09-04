@@ -759,9 +759,6 @@ class HomeFragment : BaseFragment<FragmentHomeBinding>(
             // Kategoriler arası dikey kaydırmada ve yeni kategori eklenişinde animatör kaynaklı takılmaları önle
             homeMasterRecycler.itemAnimator = null
             homeMasterRecycler.setItemViewCacheSize(6)
-            // Odaklanan kart animasyonlarının ana listede kırpılmasını önle ve komşu kategorileri önceden yükle
-            homeMasterRecycler.clipChildren = false
-            homeMasterRecycler.clipToPadding = false
             (homeMasterRecycler.layoutManager as? LinearLayoutManager)?.apply {
                 isItemPrefetchEnabled = true
                 initialPrefetchItemCount = 4

@@ -4,8 +4,6 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:clipChildren="false"
-    android:clipToPadding="false"
     android:orientation="vertical">
 
     <TextView
@@ -26,7 +24,6 @@
         android:id="@+id/home_child_recyclerview"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:clipChildren="false"
         android:clipToPadding="false"
         android:descendantFocusability="afterDescendants"
         android:nextFocusUp="@id/home_child_more_info"

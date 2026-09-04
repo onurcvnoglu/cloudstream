@@ -33,6 +33,7 @@ import android.view.inputmethod.InputMethodManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.ListAdapter
 import android.widget.ListView
+import androidx.recyclerview.widget.RecyclerView
 import android.widget.Toast.LENGTH_LONG
 import androidx.annotation.AttrRes
 import androidx.annotation.ColorInt
@@ -115,6 +116,26 @@ object UIHelper {
             .setDuration(durationMs)
             .setInterpolator(DecelerateInterpolator(1.5f))
             .start()
+    }
+
+    /**
+     * RecyclerView içerisindeki odaklanan öğenin her zaman en üst katmanda çizilmesini
+     * sağlayarak kart büyüme animasyonlarında komşu veya alt öğelerin border/kenarlıkların
+     * üzerine taşmasını engeller.
+     */
+    fun RecyclerView.enableFocusedChildOnTop() {
+        setChildDrawingOrderCallback { childCount, i ->
+            val focused = focusedChild ?: return@setChildDrawingOrderCallback i
+            val focusedIndex = indexOfChild(focused)
+            if (focusedIndex == -1 || focusedIndex >= childCount) {
+                return@setChildDrawingOrderCallback i
+            }
+            when {
+                i == childCount - 1 -> focusedIndex
+                i >= focusedIndex -> i + 1
+                else -> i
+            }
+        }
     }
 
     /**

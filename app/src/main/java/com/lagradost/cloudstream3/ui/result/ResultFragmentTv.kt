@@ -59,6 +59,7 @@ import com.lagradost.cloudstream3.utils.ImageLoader.loadImage
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialogInstant
 import com.lagradost.cloudstream3.utils.UIHelper.dismissSafe
+import com.lagradost.cloudstream3.utils.UIHelper.enableFocusedChildOnTop
 import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 import com.lagradost.cloudstream3.utils.UIHelper.hideKeyboard
 import com.lagradost.cloudstream3.utils.UIHelper.navigate
@@ -373,21 +374,30 @@ class ResultFragmentTv : BaseFragment<FragmentResultTvBinding>(
                 nextDown = FOCUS_SELF,
                 nextRight = FOCUS_SELF,
             )
+            resultEpisodes.enableFocusedChildOnTop()
+            resultEpisodes.clipChildren = false
+            resultEpisodes.clipToPadding = false
+
             resultDubSelection.setLinearListLayout(
                 isHorizontal = false,
                 nextUp = FOCUS_SELF,
                 nextDown = FOCUS_SELF,
             )
+            resultDubSelection.enableFocusedChildOnTop()
+
             resultRangeSelection.setLinearListLayout(
                 isHorizontal = false,
                 nextUp = FOCUS_SELF,
                 nextDown = FOCUS_SELF,
             )
+            resultRangeSelection.enableFocusedChildOnTop()
+
             resultSeasonSelection.setLinearListLayout(
                 isHorizontal = false,
                 nextUp = FOCUS_SELF,
                 nextDown = FOCUS_SELF,
             )
+            resultSeasonSelection.enableFocusedChildOnTop()
 
             /*.layoutManager =
                 LinearListLayout(resultEpisodes.context, resultEpisodes.isRtl()).apply {

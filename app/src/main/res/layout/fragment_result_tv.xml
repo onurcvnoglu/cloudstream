@@ -740,6 +740,8 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:layout_gravity="end"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:visibility="gone"
         tools:visibility="invisible">
 
@@ -791,6 +793,8 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
             android:layout_width="wrap_content"
             android:layout_height="match_parent"
             android:layout_gravity="end"
+            android:clipChildren="false"
+            android:clipToPadding="false"
             android:orientation="horizontal"
             android:paddingStart="@dimen/result_padding"
             android:paddingEnd="@dimen/result_padding"
@@ -856,11 +860,13 @@ https://developer.android.com/design/ui/tv/samples/jet-fit
                 android:id="@+id/result_episodes"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:clipChildren="false"
                 android:clipToPadding="false"
                 android:descendantFocusability="afterDescendants"
                 android:nextFocusLeft="@id/result_range_selection"
                 android:orientation="vertical"
-                android:paddingVertical="@dimen/result_padding"
+                android:paddingTop="@dimen/result_padding"
+                android:paddingBottom="48dp"
                 app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager"
                 tools:listitem="@layout/result_episode" />
 
